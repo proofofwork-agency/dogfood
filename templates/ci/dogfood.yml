@@ -1,0 +1,51 @@
+name: dogfood
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  prove-it:
+    name: dogfood / prove-it
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        # Remove this step when the contract has no playwright-json command.
+        run: npx playwright install --with-deps chromium
+
+      - name: Validate proof contract
+        run: npx dogfood validate
+
+      - name: Run proof
+        run: npx dogfood run
+
+      - name: Publish JUnit results
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: dogfood / prove-it
+          path: artifacts/dogfood/**/junit.xml
+          reporter: java-junit
+          fail-on-error: "false"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-evidence
+          path: artifacts/dogfood/
+          if-no-files-found: error

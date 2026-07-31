@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proofofwork.agency/schemas/dogfood-advisory-receipt-v1.json",
+  "title": "Dogfood advisory evidence receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "acId",
+    "actor",
+    "driver",
+    "assessment",
+    "summary",
+    "artifacts"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "acId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "driver": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assessment": {
+      "type": "string",
+      "enum": ["satisfied", "concern", "inconclusive"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

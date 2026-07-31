@@ -1,0 +1,38 @@
+version: 2
+project: neutral-playwright-fixture
+
+build:
+  requireIdentity: true
+
+commands:
+  architecture:
+    run: node checks/architecture.mjs
+    timeoutMs: 120000
+    adapter: exit-code
+  browser:
+    run: npx playwright test --reporter=json
+    timeoutMs: 120000
+    adapter: playwright-json
+
+gates:
+  architecture: [architecture]
+  browser: [browser]
+
+oracles:
+  architecture-boundaries:
+    kind: command
+    command: architecture
+  checkout-completes:
+    kind: playwright
+    command: browser
+    tag: "@dogfood:AC-checkout"
+
+acceptanceCriteria:
+  - id: AC-architecture
+    class: deterministic
+    oracle: architecture-boundaries
+    severity: major
+  - id: AC-checkout
+    class: deterministic
+    oracle: checkout-completes
+    severity: blocker

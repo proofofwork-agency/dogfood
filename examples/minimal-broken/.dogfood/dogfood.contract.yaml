@@ -1,0 +1,28 @@
+version: 2
+project: dogfood-missing-oracle-fixture
+
+build:
+  requireIdentity: false
+
+commands:
+  proof:
+    run: node -e "process.exit(0)"
+    timeoutMs: 120000
+    adapter: exit-code
+
+gates:
+  verification: [proof]
+
+oracles:
+  proof:
+    kind: command
+    command: proof
+
+acceptanceCriteria:
+  - id: AC-mapped
+    class: deterministic
+    oracle: proof
+    severity: major
+  - id: AC-missing-oracle
+    class: deterministic
+    severity: blocker

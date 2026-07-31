@@ -1,0 +1,6 @@
+node_modules/
+test/
+.github/
+examples/*/artifacts/
+examples/*/test-results/
+DOGFOOD-E2E-PANEL-2026-07-31.md

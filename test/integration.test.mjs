@@ -1,0 +1,230 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import test from "node:test";
+import { stringify as stringifyYaml } from "yaml";
+import { initProject, runDogfood } from "../src/run.mjs";
+import { migrateContractFile } from "../src/migrate.mjs";
+import { validateContract } from "../src/validate.mjs";
+import { createProject, validContract } from "./helpers.mjs";
+
+test("validate checks mappings without pretending execution", async () => {
+  const cwd = createProject();
+  const { report, artifactDir } = await runDogfood({ cwd, validateOnly: true });
+  assert.equal(report.verdict, "PASS");
+  assert.equal(report.acceptanceCriteria[0].verdict, "not-run");
+  assert.equal(report.commands.length, 0);
+  assert.ok(existsSync(join(artifactDir, "manifest.json")));
+});
+
+test("an empty contract is an ordinary validation FAIL with failing JUnit", async () => {
+  const cwd = createProject();
+  writeFileSync(join(cwd, ".dogfood", "dogfood.contract.yaml"), "", "utf8");
+  const { report, artifactDir } = await runDogfood({ cwd, validateOnly: true });
+  assert.equal(report.verdict, "FAIL");
+  assert.ok(report.validation.errors.length > 0);
+  assert.match(readFileSync(join(artifactDir, "junit.xml"), "utf8"), /<failure/);
+});
+
+test("a passing run emits the complete portable artifact bundle", async () => {
+  const cwd = createProject();
+  const { report, artifactDir, manifest } = await runDogfood({ cwd });
+  assert.equal(report.verdict, "PASS", JSON.stringify(report.hardFails));
+  for (const path of [
+    "summary.json",
+    "summary.md",
+    "matrix.json",
+    "junit.xml",
+    "manifest.json",
+    "contract.snapshot.yaml",
+    "commands/proof/metadata.json",
+    "commands/proof/stdout.log",
+    "commands/proof/stderr.log",
+    "evidence/exit-code/proof.evaluation.json",
+  ]) {
+    assert.ok(existsSync(join(artifactDir, path)), path);
+  }
+  assert.ok(manifest.checksums["summary.json"]);
+  assert.equal(
+    manifest.checksums["summary.json"],
+    createHash("sha256").update(readFileSync(join(artifactDir, "summary.json"))).digest("hex"),
+  );
+  assert.equal(manifest.package.version, "0.2.0");
+  const latest = JSON.parse(readFileSync(join(cwd, "artifacts", "dogfood", "latest.json")));
+  assert.equal(latest.path, report.runId);
+  assert.equal(latest.path.startsWith("/"), false);
+});
+
+test("command failures and missing Playwright reports cannot pass", async () => {
+  const failing = createProject(
+    validContract(),
+    { "check.mjs": "process.exit(7);\n" },
+  );
+  assert.equal((await runDogfood({ cwd: failing })).report.verdict, "FAIL");
+
+  const contract = validContract();
+  contract.commands.proof.adapter = "playwright-json";
+  contract.oracles.proof = {
+    kind: "playwright",
+    command: "proof",
+    tag: "@dogfood:AC-proof",
+  };
+  const missingReport = createProject(contract);
+  const result = await runDogfood({ cwd: missingReport });
+  assert.equal(result.report.verdict, "FAIL");
+  assert.match(result.report.acceptanceCriteria[0].detail, /report is missing/i);
+});
+
+test("infrastructure blocks criteria and mixed problems produce FAIL", async () => {
+  const infraContract = validContract({
+    commands: {
+      proof: {
+        run: "node -e \"setTimeout(() => {}, 10000)\"",
+        timeoutMs: 20,
+        adapter: "exit-code",
+      },
+    },
+  });
+  const infra = await runDogfood({ cwd: createProject(infraContract) });
+  assert.equal(infra.report.verdict, "INFRA_ERROR");
+  assert.equal(infra.report.acceptanceCriteria[0].verdict, "blocked");
+
+  const mixedContract = validContract();
+  mixedContract.commands.product = {
+    run: "node -e \"process.exit(1)\"",
+    timeoutMs: 5000,
+    adapter: "exit-code",
+  };
+  mixedContract.gates.verification.push("product");
+  mixedContract.oracles.product = { kind: "command", command: "product" };
+  mixedContract.acceptanceCriteria.push({
+    id: "AC-product",
+    class: "deterministic",
+    oracle: "product",
+    severity: "major",
+  });
+  mixedContract.commands.proof = infraContract.commands.proof;
+  const mixed = await runDogfood({ cwd: createProject(mixedContract) });
+  assert.equal(mixed.report.verdict, "FAIL");
+  assert.ok(mixed.report.hardFails.some((problem) => problem.category === "infrastructure"));
+  assert.ok(mixed.report.hardFails.some((problem) => problem.category === "product"));
+});
+
+test("the CLI timeout override is a ceiling and cannot extend command timeouts", async () => {
+  const contract = validContract({
+    commands: {
+      proof: {
+        run: "node -e \"setTimeout(() => {}, 500)\"",
+        timeoutMs: 1000,
+        adapter: "exit-code",
+      },
+    },
+  });
+  const { report } = await runDogfood({ cwd: createProject(contract), timeoutMs: 20 });
+  assert.equal(report.verdict, "INFRA_ERROR");
+  assert.equal(report.commands[0].timeoutMs, 20);
+});
+
+test("required build identity failures cannot be accepted", async () => {
+  for (const identityCommand of ["node -e \"\"", "node -e \"process.exit(1)\""]) {
+    const contract = validContract({
+      build: {
+        requireIdentity: true,
+        identityCommand,
+        timeoutMs: 1000,
+      },
+    });
+    const { report } = await runDogfood({ cwd: createProject(contract) });
+    assert.equal(report.verdict, "FAIL");
+    assert.ok(report.hardFails.some((problem) => problem.kind === "build-identity"));
+  }
+});
+
+test("a verification command that mutates tracked state fails", async () => {
+  const cwd = createProject(
+    validContract(),
+    {
+      "tracked.txt": "before\n",
+      "check.mjs":
+        "import { writeFileSync } from 'node:fs'; writeFileSync('tracked.txt', 'after\\n');\n",
+    },
+  );
+  const { report } = await runDogfood({ cwd });
+  assert.equal(report.verdict, "FAIL");
+  assert.ok(report.commands[0].mutationDetected);
+  assert.ok(report.hardFails.some((problem) => problem.kind === "mutation"));
+});
+
+test("advisory concern receipts are copied but do not change PASS", async () => {
+  const contract = validContract();
+  contract.oracles.review = { kind: "advisory" };
+  contract.acceptanceCriteria.push({
+    id: "AC-usability",
+    class: "judgmental",
+    oracle: "review",
+    severity: "minor",
+  });
+  const cwd = createProject(contract, {
+    "reviews/screenshot.txt": "image stand-in\n",
+    "reviews/receipt.json": JSON.stringify({
+      version: 1,
+      acId: "AC-usability",
+      actor: "human reviewer",
+      driver: "browser-review",
+      assessment: "concern",
+      summary: "A non-blocking concern",
+      artifacts: ["reviews/screenshot.txt"],
+    }),
+  });
+  const { report, artifactDir } = await runDogfood({
+    cwd,
+    evidence: ["reviews/receipt.json"],
+  });
+  assert.equal(report.verdict, "PASS");
+  assert.equal(report.advisoryEvidence[0].assessment, "concern");
+  assert.ok(existsSync(join(artifactDir, "evidence", "advisory", "receipt-1.json")));
+  assert.ok(existsSync(join(artifactDir, "evidence", "advisory", "artifacts", "1", "1-screenshot.txt")));
+});
+
+test("v1 runs fail with migration guidance and --write migration creates a backup", async () => {
+  const v1 = {
+    version: 1,
+    project: "old",
+    commands: { proof: "node check.mjs" },
+    gates: { verification: ["proof"] },
+    acceptanceCriteria: [
+      {
+        id: "AC-proof",
+        class: "deterministic",
+        severity: "major",
+        oracle: { kind: "command", ref: "proof" },
+      },
+    ],
+  };
+  const cwd = createProject(v1);
+  const before = await runDogfood({ cwd, validateOnly: true });
+  assert.equal(before.report.verdict, "FAIL");
+  assert.match(before.report.validation.errors[0], /dogfood migrate/);
+
+  const contractPath = join(cwd, ".dogfood", "dogfood.contract.yaml");
+  const migrated = migrateContractFile(contractPath, { write: true });
+  assert.ok(existsSync(migrated.backupPath));
+  const parsed = (await import("yaml")).parse(readFileSync(contractPath, "utf8"));
+  assert.equal(validateContract(parsed).ok, true);
+});
+
+test("init installs equivalent skills without overwriting existing agent files", async () => {
+  const cwd = createProject();
+  const target = join(cwd, "initialized");
+  const existing = join(target, ".codex", "skills", "dogfood", "SKILL.md");
+  mkdirSync(join(target, ".codex", "skills", "dogfood"), { recursive: true });
+  writeFileSync(existing, "custom skill\n", "utf8");
+  await initProject(target);
+  assert.ok(existsSync(join(target, ".claude", "skills", "dogfood", "SKILL.md")));
+  assert.equal(readFileSync(existing, "utf8"), "custom skill\n");
+  const initialized = (await import("yaml")).parse(
+    readFileSync(join(target, ".dogfood", "dogfood.contract.yaml"), "utf8"),
+  );
+  assert.equal(validateContract(initialized).ok, false);
+});

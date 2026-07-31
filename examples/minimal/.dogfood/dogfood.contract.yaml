@@ -1,0 +1,48 @@
+version: 2
+project: dogfood-minimal-example
+description: Neutral exit-code adapter example
+
+build:
+  requireIdentity: true
+
+commands:
+  architecture:
+    run: node checks/arch.mjs
+    timeoutMs: 120000
+    adapter: exit-code
+  product:
+    run: node checks/browser.mjs
+    timeoutMs: 120000
+    adapter: exit-code
+
+gates:
+  architecture: [architecture]
+  product: [product]
+
+oracles:
+  architecture-boundaries:
+    kind: command
+    command: architecture
+  product-command:
+    kind: command
+    command: product
+  usability-review:
+    kind: advisory
+
+acceptanceCriteria:
+  - id: AC-architecture
+    class: deterministic
+    oracle: architecture-boundaries
+    severity: major
+  - id: AC-product-command
+    class: deterministic
+    oracle: product-command
+    severity: blocker
+  - id: AC-usability
+    class: judgmental
+    oracle: usability-review
+    severity: minor
+  - id: AC-excluded
+    class: excluded
+    reason: Outside this example's scope
+    severity: minor

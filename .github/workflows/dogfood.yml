@@ -1,0 +1,44 @@
+name: dogfood
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  prove-it:
+    name: dogfood / prove-it
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+      - run: npm run test:playwright-fixture
+      - run: npm run test:self
+
+      - name: Publish JUnit results
+        if: always()
+        uses: dorny/test-reporter@v2
+        with:
+          name: dogfood / prove-it
+          path: examples/playwright/artifacts/dogfood/junit.xml
+          reporter: java-junit
+          fail-on-error: "false"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-evidence
+          path: examples/*/artifacts/dogfood/
+          if-no-files-found: error
