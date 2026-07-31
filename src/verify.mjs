@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { portableRelative } from "./files.mjs";
 import { listFiles, sha256 } from "./report.mjs";
 
 const NOTICE = "Integrity verification proves internal consistency, not cryptographic provenance. A malicious actor can regenerate this unsigned manifest; signing is deferred.";
@@ -187,8 +188,9 @@ function verifyNormalizedDocument(directory, record, label, errors) {
 
 function safeBundlePath(directory, name) {
   if (typeof name !== "string" || isAbsolute(name)) return null;
-  const candidate = resolve(directory, name);
-  const rel = relative(directory, candidate);
+  const root = resolve(directory);
+  const candidate = resolve(root, name);
+  const rel = relative(root, candidate);
   if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
   return candidate;
 }
@@ -206,6 +208,4 @@ function result(directory, manifest, errors, warnings) {
   };
 }
 
-function portableRelative(from, to) {
-  return relative(from, to).split(sep).join("/") || ".";
-}
+

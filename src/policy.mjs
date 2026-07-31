@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { parse as parseYaml } from "yaml";
+import { isPathInside } from "./files.mjs";
 import { ContractInputError } from "./load-contract.mjs";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -70,8 +71,7 @@ export function validateProtectedPaths(cwd, paths) {
         errors.push(`authoritative ${label} must be a regular file inside the Git repository`);
         continue;
       }
-      const rel = relative(root, realpathSync(path));
-      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      if (!isPathInside(root, path)) {
         errors.push(`authoritative ${label} must be inside the Git repository`);
       }
     } catch (error) {

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify as stringifyYaml } from "yaml";
@@ -80,7 +80,8 @@ export function createProject(contract = validContract(), files = {}) {
   git(directory, ["config", "user.name", "Dogfood Tests"]);
   git(directory, ["add", "."]);
   git(directory, ["commit", "-qm", "fixture"]);
-  return directory;
+  // Canonicalize so Git's Windows path forms and Node resolve() agree in tests.
+  return realpathSync(directory);
 }
 
 export function git(cwd, args) {

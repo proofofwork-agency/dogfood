@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { arch, platform, release } from "node:os";
-import { join, relative, sep } from "node:path";
+import { join } from "node:path";
 import { ADAPTER_VERSIONS } from "./adapters.mjs";
-import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson, portableRelative } from "./files.mjs";
 
 export function buildReport({
   contract,
@@ -301,9 +301,7 @@ export function listFiles(root) {
   return files.sort();
 }
 
-export function portableRelative(from, to) {
-  return relative(from, to).split(sep).join("/") || ".";
-}
+export { portableRelative };
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

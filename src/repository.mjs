@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { createReadStream, lstatSync, readlinkSync, realpathSync } from "node:fs";
-import { relative, resolve, sep } from "node:path";
+import { resolve } from "node:path";
+import { portableRelative } from "./files.mjs";
 
 export async function captureRepositoryState(cwd, { authoritative = false } = {}) {
   const rootResult = gitSmall(cwd, ["rev-parse", "--show-toplevel"]);
@@ -197,10 +198,6 @@ function unavailable(error, root = null) {
 
 function cleanError(value) {
   return String(value || "").trim().split("\n").filter(Boolean).pop() || "";
-}
-
-function portableRelative(from, to) {
-  return relative(from, to).split(sep).join("/") || ".";
 }
 
 function sha256(value) {

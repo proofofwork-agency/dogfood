@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson, isPathInside } from "./files.mjs";
 import { validateAdvisoryReceipt } from "./validate.mjs";
 
 export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = [] }) {
@@ -82,8 +82,7 @@ function safeWorkspacePath(input, workspace, cwd) {
   const candidate = isAbsolute(input) ? input : resolve(cwd, input);
   if (!existsSync(candidate)) throw new Error(`path does not exist: ${input}`);
   const real = realpathSync(candidate);
-  const rel = relative(workspace, real);
-  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+  if (!isPathInside(workspace, real)) {
     throw new Error(`path escapes project workspace: ${input}`);
   }
   return real;

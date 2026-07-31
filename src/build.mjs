@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
+import { isPathInside, portableRelative } from "./files.mjs";
 
 export function inspectBuildSubject(cwd, definition) {
   if (!definition) return { subject: null, error: null };
@@ -16,15 +17,14 @@ export function inspectBuildSubject(cwd, definition) {
   } catch (error) {
     return { subject: null, error: `could not inspect build subject ${definition.path}: ${error.message}` };
   }
-  const rel = relative(workspace, real);
-  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+  if (!isPathInside(workspace, real)) {
     return { subject: null, error: `build subject escapes the workspace: ${definition.path}` };
   }
   const stat = statSync(real);
   if (!stat.isFile()) return { subject: null, error: `build subject is not a regular file: ${definition.path}` };
   return {
     subject: {
-      path: rel.split(sep).join("/"),
+      path: portableRelative(workspace, real),
       algorithm: "sha256",
       digest: sha256(readFileSync(real)),
       size: stat.size,

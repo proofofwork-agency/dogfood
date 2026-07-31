@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { extname, relative, sep } from "node:path";
+import { extname } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { isPathInside, portableRelative } from "./files.mjs";
 import { validateContract } from "./validate.mjs";
 
 export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
@@ -19,11 +20,11 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
     return result;
   }
   const root = realpathSync(rootResult.stdout.trim());
-  const rel = portableRelative(root, realpathSync(contractPath));
-  if (rel === ".." || rel.startsWith("../")) {
+  if (!isPathInside(root, contractPath)) {
     result.errors.push("authoritative contract must be inside the Git repository");
     return result;
   }
+  const rel = portableRelative(root, contractPath);
   const commitResult = git(root, ["rev-parse", "--verify", `${ref}^{commit}`]);
   if (commitResult.status !== 0) {
     result.errors.push(`baseline ref does not resolve to a commit: ${ref}`);
@@ -148,6 +149,4 @@ function clean(value) {
   return String(value || "").trim().split("\n").filter(Boolean).at(-1) || "Git command failed";
 }
 
-function portableRelative(from, to) {
-  return relative(from, to).split(sep).join("/") || ".";
-}
+

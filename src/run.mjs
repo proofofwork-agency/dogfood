@@ -10,7 +10,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { collectAdvisoryEvidence } from "./advisory.mjs";
 import { compareBaseline } from "./baseline.mjs";
 import { collectRuntimeMetadata, inspectBuildSubject } from "./build.mjs";
-import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson, portableRelative } from "./files.mjs";
 import { findContractPath, loadContractDocument } from "./load-contract.mjs";
 import { defaultPolicyPath, loadPolicyDocument, validateAuthoritativePolicy, validateProtectedPaths } from "./policy.mjs";
 import { buildReport, writeManifest, writeReport } from "./report.mjs";
@@ -334,7 +334,7 @@ function summarizeRepository(repository) {
   if (!repository) return null;
   return {
     available: repository.available,
-    root: repository.root ? portablePath(repository.root, repository.root) : null,
+    root: repository.root ? portableRelative(repository.root, repository.root) : null,
     scope: repository.scope,
     authoritative: repository.authoritative,
     head: repository.head,
@@ -350,5 +350,5 @@ function summarizeRepository(repository) {
 }
 
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
-export function portablePath(from, to) { return relative(from, to).split(sep).join("/") || "."; }
+export function portablePath(from, to) { return portableRelative(from, to); }
 export { defaultPolicyPath };
