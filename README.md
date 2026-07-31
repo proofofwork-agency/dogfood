@@ -131,6 +131,93 @@ Edit `.dogfood/dogfood.contract.yaml` and replace the placeholder with the proje
 
 Do not map a broad browser command through `exit-code` when the claim requires proof of one specific user journey. A successful Playwright process is not proof that the expected tagged test existed or ran.
 
+#### Example A: functional acceptance criterion
+
+A functional criterion describes **what a user must be able to do**.
+
+> AC: A customer can complete checkout and see the confirmation page.
+
+The project supplies a real Playwright test carrying the exact Dogfood tag:
+
+```js
+import { expect, test } from "@playwright/test";
+
+test("customer completes checkout", {
+  tag: "@dogfood:AC-functional-checkout",
+}, async ({ page }) => {
+  await page.goto("/checkout");
+  await page.getByRole("button", { name: "Pay now" }).click();
+  await expect(page.getByRole("heading", { name: "Order confirmed" })).toBeVisible();
+});
+```
+
+The contract maps that user-facing claim to the tagged evidence:
+
+```yaml
+commands:
+  browser:
+    run: npx playwright test --reporter=json
+    timeoutMs: 600000
+    adapter: playwright-json
+
+oracles:
+  checkout-completes:
+    kind: playwright
+    command: browser
+    tag: "@dogfood:AC-functional-checkout"
+
+acceptanceCriteria:
+  - id: AC-functional-checkout
+    issue: SHOP-142
+    class: deterministic
+    oracle: checkout-completes
+    severity: blocker
+```
+
+Dogfood does not accept “the browser suite exited successfully” as proof. The JSON report must contain that exact tag, and every matching execution must have passed on its first attempt.
+
+#### Example B: system or architecture criterion
+
+A system criterion describes **how the system must be technically structured**.
+
+> AC: UI code must not import database or server-only modules.
+
+The project owns the actual rule and its implementation. For example, `npm run test:architecture` could invoke dependency-cruiser, ESLint boundaries, ArchUnit, a contract test, or a custom script. Dogfood makes the complete command mandatory:
+
+```yaml
+commands:
+  architecture:
+    run: npm run test:architecture
+    timeoutMs: 120000
+    adapter: exit-code
+
+oracles:
+  architecture-boundaries:
+    kind: command
+    command: architecture
+
+acceptanceCriteria:
+  - id: AC-system-boundaries
+    issue: SHOP-142
+    class: deterministic
+    oracle: architecture-boundaries
+    severity: major
+```
+
+Dogfood does not invent or understand the boundary rule. The architecture tool owns that logic; Dogfood proves the declared command ran successfully, ties it to the system criterion, and records the result.
+
+#### Putting both types in one gate
+
+Most projects should include both types in the same contract:
+
+```text
+Functional AC -> exact Playwright tag -------┐
+                                             ├-> Dogfood -> one hard verdict
+System AC ----> architecture command --------┘
+```
+
+If either deterministic criterion fails, the overall result is `FAIL`. If an important functional or system criterion is absent from the contract, Dogfood cannot prove it.
+
 ### 4. Validate, run, and read the report
 
 ```bash
@@ -218,6 +305,112 @@ Run `npx dogfood validate`. If it passes, run `npx dogfood run`. Do not edit cod
 ```
 
 This is functionally the same CLI workflow; the checked-in skills simply make the policy reusable across sessions and team members.
+
+## Automation examples
+
+Automation runs the proof contract that your team has already committed. It does **not** write the acceptance criteria, invent architecture rules, or create missing tests. Those still come from the story or issue, the product requirements, and the system's engineering rules.
+
+### GitHub Actions: the authoritative gate
+
+For a shared repository, CI is the best place for the hard merge decision because it runs against the exact commit being reviewed and does not depend on one developer's laptop or an open agent session.
+
+Create `.github/workflows/dogfood.yml` in the project using Dogfood:
+
+```yaml
+name: dogfood
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 2 * * *" # Optional nightly proof run, in UTC.
+
+jobs:
+  prove-it:
+    name: dogfood / prove-it
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        # Delete this step when the contract has no playwright-json command.
+        run: npx playwright install --with-deps chromium
+
+      - name: Validate proof contract
+        run: npx dogfood validate
+
+      - name: Run proof
+        run: npx dogfood run
+
+      - name: Publish JUnit results
+        if: always()
+        uses: dorny/test-reporter@v3
+        with:
+          name: dogfood / prove-it
+          path: artifacts/dogfood/**/junit.xml
+          reporter: java-junit
+          fail-on-error: "false"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dogfood-evidence
+          path: artifacts/dogfood/
+          if-no-files-found: error
+```
+
+The job returns Dogfood's exit code, so a failed proof fails the check. `merge_group` also runs the gate for GitHub merge queues. The `if: always()` steps preserve JUnit and the full evidence bundle even when validation or proof fails. See GitHub's documentation for [workflow triggers](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows) and [workflow artifacts](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflow-artifacts).
+
+The nightly `schedule` is optional. Pull requests and merge queues should remain the authoritative completion gate; a nightly run is useful for detecting environmental drift or failures caused by newly changed dependencies.
+
+### Claude Code: session loop or durable routine
+
+For a temporary recurring check while a Claude Code session stays open, use `/loop`:
+
+```text
+/loop 1h /dogfood Run the deterministic acceptance gate. Do not repair during the run. Report the verdict, failing criteria, and evidence path.
+```
+
+This is session-local: closing Claude Code stops the loop, and recurring tasks expire after seven days. It is useful while actively implementing a story, but it should not replace CI.
+
+For a durable cloud schedule, ask Claude Code to create a routine with `/schedule`, for example:
+
+```text
+/schedule every weekday at 09:00 in this repository, use /dogfood to validate and run the deterministic acceptance gate, then report the verdict, failing criteria, commit, and evidence path
+```
+
+Claude's cloud routine runs in a fresh repository clone, so commit the contract, skills, tests, and architecture rules it needs. A desktop schedule can access local files, but the desktop app and machine must remain running. Claude documents the distinction in [scheduled tasks](https://code.claude.com/docs/en/scheduled-tasks), [routines](https://code.claude.com/docs/en/routines), and [desktop scheduled tasks](https://code.claude.com/docs/en/desktop-scheduled-tasks).
+
+### Codex: scheduled task
+
+Codex can run the equivalent check as a scheduled task. Create it in the Codex desktop app, ChatGPT desktop app, or the web **Scheduled** page and use an explicit prompt such as:
+
+```text
+Every weekday at 09:00, in this project:
+Use $dogfood to validate and run the deterministic acceptance gate.
+Do not edit product code or tests during verification.
+Report PASS, FAIL, or INFRA_ERROR, the failing criteria, the commit, and the evidence path.
+```
+
+The Codex CLI and IDE extension do not currently provide the schedule-management screen. A local desktop task can use the local project or an isolated worktree, but the app and machine must stay on. A web task runs remotely and cannot directly use an uncommitted local folder. Scheduled tasks can explicitly invoke the checked-in `$dogfood` skill. See the official [Codex scheduled tasks documentation](https://learn.chatgpt.com/docs/automations).
+
+### Which automation should decide whether work is done?
+
+Use GitHub Actions as the hard, shared gate. Use Claude or Codex schedules as useful extra operators—for example, to run a morning check, watch a long implementation branch, or summarize failures for a person. They all run the same Dogfood contract; the agent does not get a different or easier definition of PASS.
 
 ## Requirements
 
