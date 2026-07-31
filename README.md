@@ -3,19 +3,30 @@
 Dogfood is a final verification checkpoint that you add after implementation:
 
 ```mermaid
-flowchart LR
+flowchart TB
     A[Plan] --> B[Implement the work]
-    B --> C[Run Dogfood]
-    D[Architecture checks] --> C
-    E[Tests, build, and types] --> C
-    F[Playwright journeys] --> C
-    C --> G{Verdict}
-    G -->|PASS| H[Complete work and save evidence]
-    G -->|FAIL| I[Fix the work]
-    G -->|INFRA_ERROR| J[Fix the environment]
-    I --> C
-    J --> C
+    B --> C[Ready for verification]
+    C --> D[Run the Dogfood CLI]
+
+    H[Human or CI] --> D
+    CL[Claude Code: /dogfood] --> D
+    CO[Codex: $dogfood] --> D
+
+    D --> E[Architecture checks]
+    D --> F[Tests, build, and types]
+    D --> G[Playwright journeys]
+    E --> V{Verdict}
+    F --> V
+    G --> V
+
+    V -->|PASS| P[Complete work and save evidence]
+    V -->|FAIL| X[Fix the work]
+    V -->|INFRA_ERROR| Y[Fix the environment]
+    X --> D
+    Y --> D
 ```
+
+Claude Code invokes `/dogfood`; Codex invokes `$dogfood`. Both validate the contract, run the same independent Dogfood CLI, read the generated report, and return the same PASS, FAIL, or INFRA_ERROR verdict to the workflow.
 
 You configure the checks that matter to your project: architecture rules, unit or integration tests, builds, type checks, security checks, and exact Playwright user journeys. Dogfood runs those checks, connects their results to your acceptance criteria, and blocks the workflow when the required proof is missing or failing. It also produces a report showing exactly what passed and failed.
 
