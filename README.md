@@ -1,10 +1,16 @@
 # @proofofwork-agency/dogfood
 
-Dogfood is a standalone CLI that answers one release question: **does this exact checkout contain enough evidence to call the work done?**
+Dogfood is a final verification checkpoint that you add after implementation:
 
-A green shell command alone does not show which acceptance criterion was proved, whether the expected browser test actually ran, or whether verification changed the code it inspected. Dogfood closes that gap with a versioned YAML contract. The contract declares the acceptance criteria, the commands that verify them, and the evidence adapter used to evaluate each result.
+```text
+Plan -> implement the work -> run Dogfood -> PASS or FAIL -> save the evidence
+```
 
-Dogfood can be run directly by a developer or CI job. Claude Code and Codex can also operate it through generated project skills, but no agent is required and an agent's opinion can never replace deterministic evidence.
+You configure the checks that matter to your project: architecture rules, unit or integration tests, builds, type checks, security checks, and exact Playwright user journeys. Dogfood runs those checks, connects their results to your acceptance criteria, and blocks the workflow when the required proof is missing or failing. It also produces a report showing exactly what passed and failed.
+
+Dogfood does not invent your architecture rules or automatically decide what “correct architecture” means. You provide the architecture command—for example dependency-boundary tests, lint rules, or a custom architecture script—and Dogfood makes that command a required, recorded part of completion.
+
+You can run Dogfood manually, from CI, at the end of an implementation workflow, or through Claude Code or Codex. All four use the same independent CLI and receive the same verdict.
 
 ## What Dogfood does
 
