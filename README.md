@@ -85,7 +85,7 @@ A `PASS` does **not** mean that:
 
 ### 1. Install an exact revision
 
-The package is intentionally private and unpublished on npm while v2 is validated. Install an exact public Git revision:
+The package is intentionally private and unpublished on npm while v0.3 is validated. Install an exact public Git revision:
 
 ```bash
 npm install --save-dev github:proofofwork-agency/dogfood#<full-commit-sha>
@@ -101,6 +101,8 @@ Run this from the Git repository or package directory you want Dogfood to verify
 ```bash
 npx dogfood init
 ```
+
+Use `npx dogfood init --authoritative` for a protected CI setup. It also creates the explicit `.dogfood/dogfood.policy.yaml`; without `--policy`, Dogfood intentionally retains the standard compatibility behavior.
 
 Initialization creates:
 
@@ -314,66 +316,11 @@ Automation runs the proof contract that your team has already committed. It does
 
 For a shared repository, CI is the best place for the hard merge decision because it runs against the exact commit being reviewed and does not depend on one developer's laptop or an open agent session.
 
-Create `.github/workflows/dogfood.yml` in the project using Dogfood:
+Run `dogfood init --authoritative` and copy `.dogfood/github-workflow.dogfood.yml` to `.github/workflows/dogfood.yml`. The generated workflow pins every action to an immutable commit, tests Node 20 and 24 on Ubuntu and Windows, runs Chromium on Ubuntu, keeps project commands on read-only tokens, publishes JUnit in a separate `checks: write` job, uploads evidence unconditionally, and exposes one stable `dogfood / prove-it` aggregation check.
 
-```yaml
-name: dogfood
+Protected pull-request and merge-group runs pass the base commit through `--baseline-ref`, so deterministic criteria and required gates cannot silently regress. The repository's own workflow is the executable reference. See GitHub's documentation for [workflow triggers](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows) and [workflow artifacts](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflow-artifacts).
 
-on:
-  pull_request:
-  merge_group:
-  push:
-    branches: [main]
-  workflow_dispatch:
-  schedule:
-    - cron: "17 2 * * *" # Optional nightly proof run, in UTC.
-
-jobs:
-  prove-it:
-    name: dogfood / prove-it
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "20"
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Chromium
-        # Delete this step when the contract has no playwright-json command.
-        run: npx playwright install --with-deps chromium
-
-      - name: Validate proof contract
-        run: npx dogfood validate
-
-      - name: Run proof
-        run: npx dogfood run
-
-      - name: Publish JUnit results
-        if: always()
-        uses: dorny/test-reporter@v3
-        with:
-          name: dogfood / prove-it
-          path: artifacts/dogfood/**/junit.xml
-          reporter: java-junit
-          fail-on-error: "false"
-
-      - name: Upload evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: dogfood-evidence
-          path: artifacts/dogfood/
-          if-no-files-found: error
-```
-
-The job returns Dogfood's exit code, so a failed proof fails the check. `merge_group` also runs the gate for GitHub merge queues. The `if: always()` steps preserve JUnit and the full evidence bundle even when validation or proof fails. See GitHub's documentation for [workflow triggers](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows) and [workflow artifacts](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflow-artifacts).
+After the implementation is merged and the check name has appeared on `main`, protect the branch with required pull requests, one code-owner approval, stale-approval dismissal, approval after the latest push, up-to-date `dogfood / prove-it`, administrator enforcement, conversation resolution, and linear history. Keep force pushes and branch deletion disabled. Tag `v0.3.0` only on the exact clean public commit whose authoritative bundle verified successfully; branch protection and tagging are repository-owner actions, not runner side effects.
 
 The nightly `schedule` is optional. Pull requests and merge queues should remain the authoritative completion gate; a nightly run is useful for detecting environmental drift or failures caused by newly changed dependencies.
 
@@ -422,9 +369,12 @@ Use GitHub Actions as the hard, shared gate. Use Claude or Codex schedules as us
 
 ```bash
 dogfood init
-dogfood validate
-dogfood run
+dogfood init --authoritative
+dogfood validate --policy .dogfood/dogfood.policy.yaml --baseline-ref <base-sha>
+dogfood run --policy .dogfood/dogfood.policy.yaml --baseline-ref <base-sha>
 dogfood run --evidence reviews/usability.json
+dogfood verify artifacts/dogfood/<run-id>
+dogfood verify artifacts/dogfood/<run-id> --subject dist/application.tar.gz
 dogfood migrate                 # print converted v2 YAML
 dogfood migrate --write         # back up and replace a v1 contract
 dogfood report
@@ -434,8 +384,8 @@ Exit codes are stable:
 
 | Code | Meaning |
 |---:|---|
-| 0 | PASS |
-| 1 | FAIL: invalid contract, failed proof, missing evidence, or mutation |
+| 0 | VALID, PASS, or a completely verified bundle |
+| 1 | INVALID/FAIL, tampered evidence, or incomplete verification |
 | 2 | INFRA_ERROR |
 | 3 | Invalid CLI usage |
 | 4 | Unexpected runner error |
@@ -448,6 +398,9 @@ project: example-project
 
 build:
   requireIdentity: true
+  subject:
+    path: dist/application.tar.gz
+    algorithm: sha256
 
 commands:
   architecture:
@@ -484,6 +437,16 @@ acceptanceCriteria:
 ```
 
 Unknown fields, duplicate criterion IDs, unsupported kinds, broken references, invalid severities, missing oracles, and excluded criteria without reasons all fail validation. `validate` reports deterministic criteria as `not-run`; it never pretends tests executed.
+
+The optional build subject must be a regular file inside the workspace. Its SHA-256 digest, size, and portable path enter the report and manifest. When a bundle declares a subject, `dogfood verify` requires `--subject` and independently hashes the supplied file.
+
+## Authoritative policy v1
+
+Authoritative behavior is opt-in through `--policy`; merely placing a policy file in the repository does not change standard-mode behavior. Policy v1 is strict and fails closed on unknown fields or invalid values. It controls minimum deterministic scope, excluded-only contracts, required gates, baseline regression rules, Git-root mutation allowlists, optional build-subject enforcement, and persisted-log redaction.
+
+The generated `.dogfood/dogfood.policy.yaml` is the reference policy. Authoritative mutation inspection covers the complete Git root: tracked dirtiness or mutation always fails and cannot be allowlisted; created, removed, or content-changed non-ignored untracked files fail unless a repository-relative allowlist pattern matches. Git-ignored files remain explicitly outside the guarantee.
+
+`--baseline-ref` loads the contract at the protected base commit. Removed deterministic criteria, deterministic class downgrades, Playwright-to-generic-command downgrades, and removed required gates are blocked. Oracle, tag, command, severity, and criterion-text changes are reported; command-string and tag changes are marked for code-owner review without guessing their intent. A missing contract at the base is recorded as a first-adoption warning.
 
 Severity is classification metadata in v2. Every deterministic criterion fails closed regardless of whether its severity is `blocker`, `major`, or `minor`. Judgmental criteria must use an `advisory` oracle and never affect the hard verdict.
 
@@ -541,7 +504,10 @@ artifacts/dogfood/<run-id>/
   matrix.json
   junit.xml
   manifest.json
+  contract.original.yaml
   contract.snapshot.yaml
+  policy.original.yaml          # authoritative mode
+  policy.snapshot.yaml          # authoritative mode
   commands/<name>/metadata.json
   commands/<name>/stdout.log
   commands/<name>/stderr.log
@@ -549,7 +515,9 @@ artifacts/dogfood/<run-id>/
 artifacts/dogfood/latest.json
 ```
 
-The manifest includes SHA-256 checksums, contract digest, Git HEAD and dirty-state digest, runtime and package versions, command definitions, timestamps, and adapter versions. `latest.json` contains only relative pointers.
+Report and manifest format v3 store the exact source contract and policy bytes alongside normalized snapshots. The manifest records separate source and normalized digests, SHA-256 checksums for every evidence file, repository/build identity, optional subject metadata, runtime and package versions, command definitions, timestamps, adapters, and best-effort Git/npm/Playwright/lockfile metadata. `latest.json` is written atomically only after the complete manifest and contains only relative pointers.
+
+`dogfood verify` accepts v3 bundles, validates their structure and every recorded checksum, recomputes source and normalized document digests, and cross-checks report, manifest, run ID, repository identity, and subject metadata. V2 bundles are rejected with rerun guidance because their exact source-contract digest is not reproducible. Verification proves internal consistency, not cryptographic provenance: an attacker able to regenerate an unsigned manifest can regenerate its checksums. Signing and external attestations remain deferred.
 
 Dogfood has no retries and no repair loop. Infrastructure trouble blocks affected criteria and yields `INFRA_ERROR` only when every blocking problem is infrastructure-related; mixed product and infrastructure problems yield `FAIL`.
 
@@ -557,11 +525,13 @@ Dogfood has no retries and no repair loop. Infrastructure trouble blocks affecte
 
 The contract is trusted executable project code. Commands run through the system shell so projects can use ordinary shell syntax; do not run contracts obtained from an untrusted source.
 
-Mutation enforcement compares Git HEAD and a streamed SHA-256 digest of `git diff HEAD -- .` before and after each command. It covers tracked files inside the configured `--cwd` workspace. Untracked writes and tracked sibling paths outside `--cwd` are recorded in repository metadata where visible, but do not fail the run. This boundary intentionally permits test caches and generated evidence; projects requiring a pollution-free workspace should run Dogfood in a clean disposable checkout.
+Standard mode compares Git HEAD and a streamed SHA-256 digest of `git diff HEAD -- .` before and after each command. It covers tracked files inside the configured `--cwd` workspace and preserves v0.2 behavior, including legitimate excluded-only contracts. Authoritative mode uses the stricter Git-root boundary described above.
+
+Commands run in isolated process groups. Timeout, SIGINT, SIGTERM, and runner cancellation terminate the full POSIX process group or Windows process tree; interrupted proof is infrastructure trouble. Authoritative `full-redacted` logs replace configured environment values and literals before persistence, while `metadata-only` stores command metadata without stdout/stderr. Raw output exists only in memory long enough for evidence adapters and build identity.
 
 `--timeout-ms` is a global hard ceiling: each command uses the smaller of this value and its contract `timeoutMs`.
 
-The CLI is the supported public interface in v2. Direct imports from `src/` are internal and may change before publication.
+The CLI is the supported public interface in v0.3. Contract format remains v2; policy is v1 and report/manifest are v3. Direct imports from `src/` are internal and may change before publication.
 
 ## Development
 

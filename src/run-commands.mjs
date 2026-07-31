@@ -1,19 +1,30 @@
-import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { evaluateAdapter, prepareAdapter } from "./adapters.mjs";
-import { captureRepositoryState, repositoryStateChanged } from "./repository.mjs";
+import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
+import {
+  authoritativeRepositoryProblems,
+  captureRepositoryState,
+  repositoryStateChanged,
+} from "./repository.mjs";
 
 const MAX_CAPTURE_BYTES = 5 * 1024 * 1024;
 
-export function runCommand(name, command, { cwd, timeoutMs = 600_000, env = process.env } = {}) {
+export function runCommand(
+  name,
+  command,
+  { cwd, timeoutMs = 600_000, env = process.env, signal } = {},
+) {
   const startedAt = new Date().toISOString();
   const started = Date.now();
-  return new Promise((resolve) => {
+  return new Promise((resolvePromise) => {
+    const detached = process.platform !== "win32";
     const child = spawn(command, {
       cwd,
       env: { ...env, DOGFOOD: "1" },
       shell: true,
+      detached,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -21,63 +32,62 @@ export function runCommand(name, command, { cwd, timeoutMs = 600_000, env = proc
     const stderrCapture = createCapture();
     let settled = false;
     let timedOut = false;
+    let interrupted = false;
+    let closeResult = null;
+    let forceKillTimer = null;
+    let forceSweepDone = false;
 
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      const killTimer = setTimeout(() => child.kill("SIGKILL"), 3000);
-      killTimer.unref();
-    }, timeoutMs);
-
-    child.stdout?.on("data", (chunk) => {
-      appendCapture(stdoutCapture, chunk);
-    });
-    child.stderr?.on("data", (chunk) => {
-      appendCapture(stderrCapture, chunk);
-    });
-
-    child.on("error", (error) => {
+    const finish = (code, childSignal, error = null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({
-        name,
-        command,
-        code: null,
-        signal: null,
-        timedOut,
-        timeoutMs,
-        durationMs: Date.now() - started,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        stdout: finishCapture(stdoutCapture),
-        stderr: `${finishCapture(stderrCapture)}\n${error.message}`.trim(),
-        stdoutTruncated: stdoutCapture.truncated,
-        stderrTruncated: stderrCapture.truncated,
-        status: "infra",
-      });
-    });
-
-    child.on("close", (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      signal?.removeEventListener("abort", abort);
+      resolvePromise({
         name,
         command,
         code,
-        signal,
+        signal: childSignal,
         timedOut,
+        interrupted,
         timeoutMs,
         durationMs: Date.now() - started,
         startedAt,
         finishedAt: new Date().toISOString(),
         stdout: finishCapture(stdoutCapture),
-        stderr: finishCapture(stderrCapture),
+        stderr: `${finishCapture(stderrCapture)}${error ? `\n${error.message}` : ""}`.trim(),
         stdoutTruncated: stdoutCapture.truncated,
         stderrTruncated: stderrCapture.truncated,
-        status: timedOut || code === null || signal ? "infra" : code === 0 ? "pass" : "fail",
+        status: timedOut || interrupted || error || code === null || childSignal
+          ? "infra"
+          : code === 0 ? "pass" : "fail",
       });
+    };
+
+    const terminate = (reason) => {
+      if (settled || timedOut || interrupted) return;
+      if (reason === "timeout") timedOut = true;
+      else interrupted = true;
+      terminateTree(child.pid, "SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        terminateTree(child.pid, "SIGKILL");
+        forceSweepDone = true;
+        if (closeResult) finish(closeResult.code, closeResult.signal);
+      }, 500);
+    };
+    const abort = () => terminate("interrupted");
+    const timer = setTimeout(() => terminate("timeout"), timeoutMs);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+
+    child.stdout?.on("data", (chunk) => appendCapture(stdoutCapture, chunk));
+    child.stderr?.on("data", (chunk) => appendCapture(stderrCapture, chunk));
+    child.on("error", (error) => finish(null, null, error));
+    child.on("close", (code, childSignal) => {
+      closeResult = { code, signal: childSignal };
+      if (!timedOut && !interrupted) finish(code, childSignal);
+      else if (forceSweepDone) finish(code, childSignal);
+      // During termination, wait for the forced process-group sweep before resolving.
     });
   });
 }
@@ -85,13 +95,61 @@ export function runCommand(name, command, { cwd, timeoutMs = 600_000, env = proc
 export async function runNamedCommands(
   names,
   commands,
-  { cwd, artifactDir, timeoutMs, expectedTagsByCommand = {} },
+  {
+    cwd,
+    artifactDir,
+    timeoutMs,
+    expectedTagsByCommand = {},
+    authoritative = false,
+    allowUntracked = [],
+    logs = null,
+    signal,
+  },
 ) {
   const results = [];
   for (const name of names) {
+    if (signal?.aborted) {
+      const definition = commands[name];
+      const timestamp = new Date().toISOString();
+      const result = {
+        name,
+        command: definition.run,
+        definition,
+        code: null,
+        signal: null,
+        timedOut: false,
+        interrupted: true,
+        timeoutMs: timeoutMs == null ? definition.timeoutMs : Math.min(timeoutMs, definition.timeoutMs),
+        durationMs: 0,
+        startedAt: timestamp,
+        finishedAt: timestamp,
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        status: "infra",
+        detail: "command was not started because the proof was interrupted",
+        adapter: {
+          adapter: definition.adapter,
+          version: null,
+          status: "infra",
+          detail: "command was not started because the proof was interrupted",
+          tags: {},
+        },
+        evidence: { report: null, evaluation: null },
+        mutationDetected: false,
+        mutationProblems: [],
+        repositoryInspectionFailed: false,
+        repositoryBefore: null,
+        repositoryAfter: null,
+      };
+      results.push(result);
+      writeCommandLogs(artifactDir, [result], { logs, env: process.env });
+      continue;
+    }
     const definition = commands[name];
     const prepared = prepareAdapter(name, definition, artifactDir);
-    const beforeRepository = await captureRepositoryState(cwd);
+    const beforeRepository = await captureRepositoryState(cwd, { authoritative });
     const effectiveTimeoutMs = timeoutMs == null
       ? definition.timeoutMs
       : Math.min(timeoutMs, definition.timeoutMs);
@@ -99,9 +157,15 @@ export async function runNamedCommands(
       cwd,
       timeoutMs: effectiveTimeoutMs,
       env: { ...process.env, ...prepared.env },
+      signal,
     });
-    const afterRepository = await captureRepositoryState(cwd);
-    const mutationDetected = repositoryStateChanged(beforeRepository, afterRepository);
+    const afterRepository = await captureRepositoryState(cwd, { authoritative });
+    const authoritativeProblems = authoritative
+      ? authoritativeRepositoryProblems(beforeRepository, afterRepository, allowUntracked)
+      : [];
+    const mutationDetected = authoritative
+      ? authoritativeProblems.some((message) => !message.includes("started with tracked changes"))
+      : repositoryStateChanged(beforeRepository, afterRepository);
     const repositoryInspectionFailed = !beforeRepository.available || !afterRepository.available;
     const adapter = evaluateAdapter(
       definition,
@@ -114,15 +178,16 @@ export async function runNamedCommands(
     let detail = adapter.detail;
     if (processResult.status === "infra") {
       status = "infra";
+      detail = processResult.interrupted ? "command was interrupted" : adapter.detail;
     } else if (processResult.status === "fail") {
       status = "fail";
     } else if (repositoryInspectionFailed) {
       status = "infra";
-      detail = "tracked repository state could not be inspected before and after the command";
+      detail = "repository state could not be inspected before and after the command";
     }
     if (mutationDetected) {
       status = "fail";
-      detail = "verification command changed tracked repository state";
+      detail = authoritativeProblems.join("; ") || "verification command changed tracked repository state";
     }
 
     const result = {
@@ -131,76 +196,121 @@ export async function runNamedCommands(
       status,
       detail,
       adapter,
-      evidence: {
-        report: prepared.reportFile,
-        evaluation: prepared.evaluationFile,
-      },
+      evidence: { report: prepared.reportFile, evaluation: prepared.evaluationFile },
       mutationDetected,
+      mutationProblems: authoritativeProblems,
       repositoryInspectionFailed,
       repositoryBefore: summarizeRepository(beforeRepository),
       repositoryAfter: summarizeRepository(afterRepository),
     };
     results.push(result);
-    writeCommandLogs(artifactDir, [result]);
+    writeCommandLogs(artifactDir, [result], { logs, env: process.env });
   }
   return results;
 }
 
-export function writeCommandLogs(artifactDir, results) {
+export function writeCommandLogs(artifactDir, results, { logs = null, env = process.env } = {}) {
   const root = join(artifactDir, "commands");
   mkdirSync(root, { recursive: true });
   for (const result of results) {
     const directory = join(root, safeSegment(result.name));
     mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, "stdout.log"), result.stdout || "", "utf8");
-    writeFileSync(join(directory, "stderr.log"), result.stderr || "", "utf8");
-    writeFileSync(
-      join(directory, "metadata.json"),
-      JSON.stringify(
-        {
-          name: result.name,
-          definition: result.definition || null,
-          command: result.command,
-          status: result.status,
-          detail: result.detail || null,
-          code: result.code,
-          signal: result.signal,
-          timedOut: result.timedOut,
-          timeoutMs: result.timeoutMs,
-          durationMs: result.durationMs,
-          startedAt: result.startedAt,
-          finishedAt: result.finishedAt,
-          stdoutTruncated: result.stdoutTruncated,
-          stderrTruncated: result.stderrTruncated,
-          mutationDetected: result.mutationDetected || false,
-          repositoryInspectionFailed: result.repositoryInspectionFailed || false,
-          repositoryBefore: result.repositoryBefore || null,
-          repositoryAfter: result.repositoryAfter || null,
-          evidence: result.evidence || null,
-          adapter: result.adapter || null,
-        },
-        null,
-        2,
-      ),
-      "utf8",
-    );
+    const persisted = persistedLogs(result, logs, env);
+    atomicWriteFile(join(directory, "stdout.log"), persisted.stdout, "utf8");
+    atomicWriteFile(join(directory, "stderr.log"), persisted.stderr, "utf8");
+    atomicWriteJson(join(directory, "metadata.json"), {
+      name: result.name,
+      definition: result.definition || null,
+      command: result.command,
+      status: result.status,
+      detail: result.detail || null,
+      code: result.code,
+      signal: result.signal,
+      timedOut: result.timedOut,
+      interrupted: result.interrupted || false,
+      timeoutMs: result.timeoutMs,
+      durationMs: result.durationMs,
+      startedAt: result.startedAt,
+      finishedAt: result.finishedAt,
+      stdoutTruncated: result.stdoutTruncated,
+      stderrTruncated: result.stderrTruncated,
+      logCapture: persisted.capture,
+      redactionApplied: persisted.redactionApplied,
+      mutationDetected: result.mutationDetected || false,
+      mutationProblems: result.mutationProblems || [],
+      repositoryInspectionFailed: result.repositoryInspectionFailed || false,
+      repositoryBefore: result.repositoryBefore || null,
+      repositoryAfter: result.repositoryAfter || null,
+      evidence: result.evidence || null,
+      adapter: result.adapter || null,
+    });
+  }
+}
+
+export function redactLog(value, logs, env = process.env) {
+  if (!logs) return String(value || "");
+  const literals = new Set(logs.redactLiterals || []);
+  for (const [name, secret] of Object.entries(env)) {
+    if (!secret || !(logs.redactEnv || []).some((pattern) => wildcard(pattern).test(name))) continue;
+    literals.add(String(secret));
+  }
+  let output = String(value || "");
+  for (const literal of [...literals].filter(Boolean).sort((a, b) => b.length - a.length)) {
+    output = output.split(literal).join("[REDACTED]");
+  }
+  return output;
+}
+
+function persistedLogs(result, logs, env) {
+  if (logs?.capture === "metadata-only") {
+    return { stdout: "", stderr: "", capture: "metadata-only", redactionApplied: true };
+  }
+  return {
+    stdout: redactLog(result.stdout, logs, env),
+    stderr: redactLog(result.stderr, logs, env),
+    capture: logs ? "full-redacted" : "full",
+    redactionApplied: Boolean(logs),
+  };
+}
+
+function terminateTree(pid, signal) {
+  if (!pid) return;
+  try {
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" });
+    } else {
+      process.kill(-pid, signal);
+    }
+  } catch (error) {
+    if (error?.code !== "ESRCH") return;
   }
 }
 
 function summarizeRepository(repository) {
   return {
     available: repository.available,
+    root: repository.root,
+    scope: repository.scope,
+    authoritative: repository.authoritative,
     head: repository.head,
     dirty: repository.dirty,
     trackedDirty: repository.trackedDirty,
     dirtyStateDigest: repository.dirtyStateDigest,
+    trackedStateDigest: repository.trackedStateDigest,
     diffDigest: repository.diffDigest,
+    untracked: repository.untracked,
+    ignoredFilesCovered: false,
     error: repository.error,
   };
 }
 
 function safeSegment(value) {
   return String(value).replace(/[^A-Za-z0-9._-]+/g, "_");
+}
+
+function wildcard(pattern) {
+  const source = String(pattern).replace(/[|\\{}()[\]^$+?.]/g, "\\$&").replaceAll("*", ".*");
+  return new RegExp(`^${source}$`);
 }
 
 function createCapture() {

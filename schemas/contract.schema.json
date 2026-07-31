@@ -40,6 +40,21 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 3600000
+        },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "algorithm"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "algorithm": {
+              "type": "string",
+              "const": "sha256"
+            }
+          }
         }
       }
     },

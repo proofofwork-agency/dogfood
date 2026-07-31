@@ -8,44 +8,98 @@ on:
   workflow_dispatch:
 
 jobs:
-  prove-it:
-    name: dogfood / prove-it
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  tests:
+    name: tests / ${{ matrix.os }} / node-${{ matrix.node }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 24]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node }}
           cache: npm
+      - run: npm ci
+      - run: npm test
 
-      - name: Install dependencies
-        run: npm ci
-
+  authoritative:
+    name: authoritative bundle / chromium
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
       - name: Install Chromium
-        # Remove this step when the contract has no playwright-json command.
         run: npx playwright install --with-deps chromium
-
-      - name: Validate proof contract
-        run: npx dogfood validate
-
-      - name: Run proof
-        run: npx dogfood run
-
-      - name: Publish JUnit results
+      - name: Resolve protected baseline
+        id: baseline
+        shell: bash
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MERGE_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          if [ -n "$PR_BASE" ]; then
+            echo "args=--baseline-ref $PR_BASE" >> "$GITHUB_OUTPUT"
+          elif [ -n "$MERGE_BASE" ]; then
+            echo "args=--baseline-ref $MERGE_BASE" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
+      - run: npx dogfood validate --policy .dogfood/dogfood.policy.yaml ${{ steps.baseline.outputs.args }}
+      - run: npx dogfood run --policy .dogfood/dogfood.policy.yaml ${{ steps.baseline.outputs.args }}
+      - name: Verify generated bundle
+        run: node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('artifacts/dogfood/latest.json')); require('child_process').execFileSync('npx',['dogfood','verify','artifacts/dogfood/'+p.path],{stdio:'inherit',shell:process.platform==='win32'})"
+      - name: Upload evidence
         if: always()
-        uses: dorny/test-reporter@v3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dogfood-evidence
+          path: artifacts/dogfood/
+          if-no-files-found: error
+
+  junit:
+    name: publish JUnit
+    if: always()
+    needs: [authoritative]
+    permissions:
+      contents: read
+      checks: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dogfood-evidence
+          path: artifacts/dogfood
+      - uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
         with:
           name: dogfood / prove-it
           path: artifacts/dogfood/**/junit.xml
           reporter: java-junit
           fail-on-error: "false"
 
-      - name: Upload evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: dogfood-evidence
-          path: artifacts/dogfood/
-          if-no-files-found: error
+  prove-it:
+    name: dogfood / prove-it
+    if: always()
+    needs: [tests, authoritative, junit]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every proof job
+        env:
+          TESTS: ${{ needs.tests.result }}
+          AUTHORITATIVE: ${{ needs.authoritative.result }}
+          JUNIT: ${{ needs.junit.result }}
+        run: test "$TESTS" = success && test "$AUTHORITATIVE" = success && test "$JUNIT" = success

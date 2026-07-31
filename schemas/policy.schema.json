@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proofofwork.agency/schemas/dogfood-policy-v1.json",
+  "title": "Dogfood authoritative policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "profile", "criteria", "baseline", "mutation", "build", "logs"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "profile": { "type": "string", "const": "authoritative" },
+    "criteria": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumDeterministic", "forbidAllExcluded", "requiredGates"],
+      "properties": {
+        "minimumDeterministic": { "type": "integer", "minimum": 0 },
+        "forbidAllExcluded": { "type": "boolean" },
+        "requiredGates": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "https://proofofwork.agency/schemas/dogfood-contract-v2.json#/$defs/name" }
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blockRemovedDeterministic", "blockClassDowngrade", "blockPlaywrightToCommand", "blockRemovedRequiredGates"],
+      "properties": {
+        "blockRemovedDeterministic": { "type": "boolean" },
+        "blockClassDowngrade": { "type": "boolean" },
+        "blockPlaywrightToCommand": { "type": "boolean" },
+        "blockRemovedRequiredGates": { "type": "boolean" }
+      }
+    },
+    "mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "mode", "allowUntracked"],
+      "properties": {
+        "scope": { "type": "string", "const": "git-root" },
+        "mode": { "type": "string", "const": "git-visible" },
+        "allowUntracked": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requireSubject"],
+      "properties": { "requireSubject": { "type": "boolean" } }
+    },
+    "logs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capture", "redactEnv", "redactLiterals"],
+      "properties": {
+        "capture": { "type": "string", "enum": ["full-redacted", "metadata-only"] },
+        "redactEnv": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "redactLiterals": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

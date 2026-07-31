@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWriteJson } from "./files.mjs";
 
 export const ADAPTER_VERSIONS = Object.freeze({
   "exit-code": "1",
@@ -55,7 +56,7 @@ export function evaluateAdapter(definition, processResult, prepared, expectedTag
     };
   }
 
-  writeFileSync(prepared.evaluationPath, JSON.stringify(evaluation, null, 2), "utf8");
+  atomicWriteJson(prepared.evaluationPath, evaluation);
   return evaluation;
 }
 
@@ -117,6 +118,8 @@ export function evaluatePlaywrightJson(
   if (reportPath && existsSync(reportPath)) {
     try {
       report = parsePlaywrightReport(readFileSync(reportPath, "utf8"));
+      // Replace the reporter's completed output through our atomic writer before publication.
+      atomicWriteJson(reportPath, report);
       base.reportSource = "file";
     } catch (error) {
       return {
@@ -129,7 +132,7 @@ export function evaluatePlaywrightJson(
     try {
       report = parsePlaywrightReport(processResult.stdout);
       if (!reportPath) throw new Error("Dogfood did not allocate a report destination");
-      writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf8");
+      atomicWriteJson(reportPath, report);
       base.reportSource = "stdout-fallback";
     } catch (error) {
       return {

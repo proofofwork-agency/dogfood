@@ -5,13 +5,18 @@ import { fileURLToPath } from "node:url";
 import { ContractInputError, findContractPath } from "../src/load-contract.mjs";
 import { migrateContractFile, MigrationError } from "../src/migrate.mjs";
 import { exitCodeForVerdict, initProject, PACKAGE_ROOT, runDogfood } from "../src/run.mjs";
+import { verifyBundle } from "../src/verify.mjs";
 
-const COMMANDS = new Set(["help", "version", "init", "validate", "run", "report", "migrate"]);
+const COMMANDS = new Set(["help", "version", "init", "validate", "run", "verify", "report", "migrate"]);
 const OPTION_SPECS = {
   "--cwd": { key: "cwd", value: true, commands: ["init", "validate", "run", "report", "migrate"] },
   "--contract": { key: "contract", value: true, commands: ["validate", "run", "migrate"] },
-  "--json": { key: "json", value: false, commands: ["validate", "run"] },
+  "--policy": { key: "policy", value: true, commands: ["validate", "run"] },
+  "--baseline-ref": { key: "baselineRef", value: true, commands: ["validate", "run"] },
+  "--subject": { key: "subject", value: true, commands: ["verify"] },
+  "--json": { key: "json", value: false, commands: ["validate", "run", "verify"] },
   "--force": { key: "force", value: false, commands: ["init"] },
+  "--authoritative": { key: "authoritative", value: false, commands: ["init"] },
   "--write": { key: "write", value: false, commands: ["migrate"] },
   "--timeout-ms": { key: "timeoutMs", value: true, commands: ["run"] },
   "--evidence": { key: "evidence", value: true, repeat: true, commands: ["run"] },
@@ -35,8 +40,13 @@ export function parseArgs(argv, currentDirectory = process.cwd()) {
     command,
     cwd: resolve(currentDirectory),
     contract: null,
+    policy: null,
+    baselineRef: null,
+    bundleDir: null,
+    subject: null,
     json: false,
     force: false,
+    authoritative: false,
     write: false,
     timeoutMs: null,
     evidence: [],
@@ -44,6 +54,10 @@ export function parseArgs(argv, currentDirectory = process.cwd()) {
   const seen = new Set();
   while (rest.length > 0) {
     const option = rest.shift();
+    if (command === "verify" && !option.startsWith("-") && args.bundleDir === null) {
+      args.bundleDir = option;
+      continue;
+    }
     if (option === "--help" || option === "-h") {
       if (rest.length > 0) throw new CliUsageError("--help does not accept trailing arguments");
       return { ...args, command: "help" };
@@ -70,6 +84,10 @@ export function parseArgs(argv, currentDirectory = process.cwd()) {
     if (value.length === 0) throw new CliUsageError(`Missing value for ${option}`);
     if (spec.repeat) args[spec.key].push(value);
     else args[spec.key] = value;
+  }
+
+  if (command === "verify" && !args.bundleDir) {
+    throw new CliUsageError("dogfood verify requires <bundle-dir>");
   }
 
   args.cwd = resolve(currentDirectory, args.cwd);
@@ -108,9 +126,10 @@ export async function main(argv = process.argv.slice(2)) {
 
   try {
     if (args.command === "init") {
-      const result = await initProject(args.cwd, { force: args.force });
-      console.log(`Initialized Dogfood v2 in ${args.cwd}`);
+      const result = await initProject(args.cwd, { force: args.force, authoritative: args.authoritative });
+      console.log(`Initialized Dogfood v0.3 (contract v2) in ${args.cwd}`);
       console.log(`Contract: ${result.contractPath}`);
+      if (result.policyPath) console.log(`Authoritative policy: ${result.policyPath}`);
       for (const skill of result.skillDests) console.log(`Agent skill: ${skill}`);
       console.log("The generated contract is intentionally incomplete; map its oracle before running.");
       return 0;
@@ -132,13 +151,34 @@ export async function main(argv = process.argv.slice(2)) {
       return printLatestReport(args.cwd);
     }
 
-    const { report, artifactDir, contractPath } = await runDogfood({
-      cwd: args.cwd,
-      contract: args.contract,
-      validateOnly: args.command === "validate",
-      timeoutMs: args.timeoutMs,
-      evidence: args.evidence,
-    });
+    if (args.command === "verify") {
+      const verification = verifyBundle(args.bundleDir, { subject: args.subject });
+      if (args.json) console.log(JSON.stringify(verification, null, 2));
+      else printVerification(verification);
+      return verification.ok ? 0 : 1;
+    }
+
+    const abortController = new AbortController();
+    const interrupt = () => abortController.abort();
+    process.once("SIGINT", interrupt);
+    process.once("SIGTERM", interrupt);
+    let result;
+    try {
+      result = await runDogfood({
+        cwd: args.cwd,
+        contract: args.contract,
+        policy: args.policy,
+        baselineRef: args.baselineRef,
+        validateOnly: args.command === "validate",
+        timeoutMs: args.timeoutMs,
+        evidence: args.evidence,
+        signal: abortController.signal,
+      });
+    } finally {
+      process.removeListener("SIGINT", interrupt);
+      process.removeListener("SIGTERM", interrupt);
+    }
+    const { report, artifactDir, contractPath } = result;
     if (args.json) {
       console.log(JSON.stringify({ ...report, artifactDir, contractPath }, null, 2));
     } else {
@@ -197,7 +237,7 @@ function printResult(report, artifactDir, contractPath) {
   console.log(`Contract: ${contractPath}`);
   console.log(`Artifacts: ${artifactDir}`);
   if (report.validation.errors.length > 0) {
-    console.log("\nContract errors:");
+    console.log("\nValidation errors:");
     for (const error of report.validation.errors) console.log(`  ✗ ${error}`);
   }
   if (report.validation.warnings.length > 0) {
@@ -225,23 +265,34 @@ function printResult(report, artifactDir, contractPath) {
   console.log(`\nSummary: ${join(artifactDir, "summary.md")}`);
 }
 
+function printVerification(verification) {
+  console.log(`Dogfood bundle ${verification.verdict}${verification.runId ? ` — ${verification.runId}` : ""}`);
+  console.log(`Bundle: ${verification.bundleDir}`);
+  for (const error of verification.errors) console.log(`  ✗ ${error}`);
+  for (const warning of verification.warnings) console.log(`  ! ${warning}`);
+  console.log(`\n${verification.notice}`);
+}
+
 function printHelp() {
   console.log(`
 dogfood — portable evidence gate
 
 Usage:
-  dogfood init [--cwd dir] [--force]
-  dogfood validate [--cwd dir] [--contract path] [--json]
-  dogfood run [--cwd dir] [--contract path] [--json] [--timeout-ms n]
+  dogfood init [--cwd dir] [--authoritative] [--force]
+  dogfood validate [--cwd dir] [--contract path] [--policy path]
+                   [--baseline-ref git-ref] [--json]
+  dogfood run [--cwd dir] [--contract path] [--policy path]
+              [--baseline-ref git-ref] [--json] [--timeout-ms n]
               [--evidence advisory-receipt.json ...]
+  dogfood verify <bundle-dir> [--subject file] [--json]
   dogfood migrate [--cwd dir] [--contract path] [--write]
   dogfood report [--cwd dir]
   dogfood version
   dogfood help
 
 Exit codes:
-  0  PASS
-  1  FAIL (invalid contract, failed proof, missing evidence, or mutation)
+  0  VALID, PASS, or verified bundle
+  1  INVALID/FAIL (including tampering or incomplete verification)
   2  INFRA_ERROR
   3  Invalid CLI usage
   4  Unexpected internal runner error

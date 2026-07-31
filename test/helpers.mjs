@@ -32,6 +32,35 @@ export function validContract(overrides = {}) {
   return deepMerge(contract, overrides);
 }
 
+export function authoritativePolicy(overrides = {}) {
+  return deepMerge({
+    version: 1,
+    profile: "authoritative",
+    criteria: {
+      minimumDeterministic: 1,
+      forbidAllExcluded: true,
+      requiredGates: ["verification"],
+    },
+    baseline: {
+      blockRemovedDeterministic: true,
+      blockClassDowngrade: true,
+      blockPlaywrightToCommand: true,
+      blockRemovedRequiredGates: true,
+    },
+    mutation: {
+      scope: "git-root",
+      mode: "git-visible",
+      allowUntracked: ["artifacts/dogfood/**"],
+    },
+    build: { requireSubject: false },
+    logs: {
+      capture: "full-redacted",
+      redactEnv: ["GITHUB_TOKEN", "*_TOKEN", "*_SECRET", "*_PASSWORD", "*_KEY", "*_CREDENTIAL*"],
+      redactLiterals: [],
+    },
+  }, overrides);
+}
+
 export function createProject(contract = validContract(), files = {}) {
   const directory = mkdtempSync(join(tmpdir(), "dogfood-v2-"));
   mkdirSync(join(directory, ".dogfood"), { recursive: true });

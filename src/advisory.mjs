@@ -1,5 +1,6 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
 import { validateAdvisoryReceipt } from "./validate.mjs";
 
 export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = [] }) {
@@ -59,7 +60,7 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
       );
       const target = join(destination, relativeDestination);
       mkdirSync(dirname(target), { recursive: true });
-      cpSync(source, target);
+      atomicWriteFile(target, readFileSync(source));
       copiedArtifacts.push(relativeDestination.split(sep).join("/"));
     }
     if (artifactError) continue;
@@ -70,7 +71,7 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
       artifacts: copiedArtifacts,
     };
     const receiptFile = `receipt-${index + 1}.json`;
-    writeFileSync(join(destination, receiptFile), JSON.stringify(normalized, null, 2), "utf8");
+    atomicWriteJson(join(destination, receiptFile), normalized);
     receipts.push({ ...normalized, receiptFile: `evidence/advisory/${receiptFile}` });
   }
 

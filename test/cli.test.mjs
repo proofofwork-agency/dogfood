@@ -16,6 +16,11 @@ test("strict CLI parsing rejects unsupported commands and arguments", () => {
   assert.throws(() => parseArgs(["run", "--cwd"]), /Missing value/);
   assert.throws(() => parseArgs(["run", "--timeout-ms", "0"]), /1 to 3600000/);
   assert.throws(() => parseArgs(["validate", "--evidence", "x.json"]), /not supported/);
+  assert.throws(() => parseArgs(["verify"]), /requires <bundle-dir>/);
+  assert.throws(() => parseArgs(["run", "--subject", "x"]), /not supported/);
+  assert.equal(parseArgs(["init", "--authoritative"]).authoritative, true);
+  assert.equal(parseArgs(["verify", "bundle", "--json"]).bundleDir, "bundle");
+  assert.equal(parseArgs(["validate", "--policy", "policy.yaml", "--baseline-ref", "main"]).baselineRef, "main");
 });
 
 test("CLI uses exit code 3 for invalid usage", () => {
@@ -27,13 +32,13 @@ test("CLI uses exit code 3 for invalid usage", () => {
   assert.match(result.stderr, /timeout-ms/);
 });
 
-test("version reports 0.2.0", () => {
+test("version reports 0.3.0", () => {
   const result = spawnSync(process.execPath, [bin, "version"], {
     cwd: root,
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "0.2.0");
+  assert.equal(result.stdout.trim(), "0.3.0");
 });
 
 test("version runs through an installed-style bin symlink", { skip: process.platform === "win32" }, () => {
@@ -46,7 +51,7 @@ test("version runs through an installed-style bin symlink", { skip: process.plat
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim(), "0.2.0");
+    assert.equal(result.stdout.trim(), "0.3.0");
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -1,0 +1,63 @@
+version: 2
+project: dogfood
+description: Dogfood v0.3 proves its own runner, browser adapter, nested self-run, and package contents.
+
+build:
+  requireIdentity: true
+
+commands:
+  unit:
+    run: npm test
+    timeoutMs: 180000
+    adapter: exit-code
+  playwright-fixture:
+    run: npm run test:playwright-fixture
+    timeoutMs: 240000
+    adapter: exit-code
+  self-run:
+    run: npm run test:self
+    timeoutMs: 120000
+    adapter: exit-code
+  package-dry-run:
+    run: npm pack --dry-run --json
+    timeoutMs: 120000
+    adapter: exit-code
+
+gates:
+  verification: [unit, playwright-fixture, self-run, package-dry-run]
+
+oracles:
+  unit-suite:
+    kind: command
+    command: unit
+  browser-adapter-fixture:
+    kind: command
+    command: playwright-fixture
+  nested-run:
+    kind: command
+    command: self-run
+  package-contents:
+    kind: command
+    command: package-dry-run
+
+acceptanceCriteria:
+  - id: AC-unit-suite
+    text: The complete Dogfood unit and integration suite passes.
+    class: deterministic
+    oracle: unit-suite
+    severity: blocker
+  - id: AC-playwright-fixture
+    text: The neutral Playwright fixture proves PASS, planted FAIL, and a final PASS.
+    class: deterministic
+    oracle: browser-adapter-fixture
+    severity: blocker
+  - id: AC-self-run
+    text: Dogfood can execute a real nested proof contract.
+    class: deterministic
+    oracle: nested-run
+    severity: major
+  - id: AC-package-dry-run
+    text: The private package can be assembled without publishing it.
+    class: deterministic
+    oracle: package-contents
+    severity: major

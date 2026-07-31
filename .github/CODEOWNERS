@@ -1,0 +1,10 @@
+/.dogfood/ @nillo @jermaine150
+/.github/workflows/ @nillo @jermaine150
+/src/ @nillo @jermaine150
+/bin/ @nillo @jermaine150
+/schemas/ @nillo @jermaine150
+/test/ @nillo @jermaine150
+/templates/ @nillo @jermaine150
+/package.json @nillo @jermaine150
+/package-lock.json @nillo @jermaine150
+/.github/CODEOWNERS @nillo @jermaine150

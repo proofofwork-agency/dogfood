@@ -7,10 +7,11 @@ description: Validate and run the portable Dogfood evidence gate without repairi
 
 Use this skill after implementation when the user needs deterministic acceptance evidence.
 
-1. Run `dogfood validate` from the project workspace.
-2. If validation passes, run `dogfood run`.
+1. If `.dogfood/dogfood.policy.yaml` exists, run `dogfood validate --policy .dogfood/dogfood.policy.yaml`; otherwise run `dogfood validate` in standard mode.
+2. If validation is `VALID`, run the matching `dogfood run` command.
 3. Read `artifacts/dogfood/latest.json` and the referenced `summary.md`.
-4. Report the verdict, acceptance-criterion matrix, failing commands, and evidence path.
+4. For a PASS, run `dogfood verify` on the referenced bundle (and provide `--subject` when declared).
+5. Report the verdict, acceptance-criterion matrix, failing commands, and evidence path.
 
 Rules:
 
@@ -26,6 +27,9 @@ Useful commands:
 ```bash
 dogfood validate
 dogfood run
+dogfood validate --policy .dogfood/dogfood.policy.yaml
+dogfood run --policy .dogfood/dogfood.policy.yaml
+dogfood verify artifacts/dogfood/<run-id>
 dogfood run --evidence path/to/advisory-receipt.json
 dogfood report
 ```

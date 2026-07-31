@@ -51,6 +51,12 @@ export function validateContract(contract) {
   if (typeof contract.project === "string" && contract.project.trim() === "") {
     errors.push("project must not be blank");
   }
+  if (typeof contract.build?.identityCommand === "string" && contract.build.identityCommand.trim() === "") {
+    errors.push("build.identityCommand must not be blank");
+  }
+  if (typeof contract.build?.subject?.path === "string" && contract.build.subject.path.trim() === "") {
+    errors.push("build.subject.path must not be blank");
+  }
 
   for (const [name, definition] of Object.entries(commands)) {
     if (typeof definition?.run === "string" && definition.run.trim() === "") {

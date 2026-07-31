@@ -1,0 +1,4 @@
+# Dogfood trust boundary — replace with your repository's owning team.
+/.dogfood/dogfood.contract.yaml @your-org/codeowners
+/.dogfood/dogfood.policy.yaml @your-org/codeowners
+/.github/workflows/ @your-org/codeowners

@@ -12,17 +12,36 @@ import { createProject, validContract } from "./helpers.mjs";
 test("validate checks mappings without pretending execution", async () => {
   const cwd = createProject();
   const { report, artifactDir } = await runDogfood({ cwd, validateOnly: true });
-  assert.equal(report.verdict, "PASS");
+  assert.equal(report.verdict, "VALID");
+  assert.equal(report.validationVerdict, "VALID");
+  assert.equal(report.proofVerdict, "NOT_RUN");
   assert.equal(report.acceptanceCriteria[0].verdict, "not-run");
   assert.equal(report.commands.length, 0);
   assert.ok(existsSync(join(artifactDir, "manifest.json")));
+});
+
+test("standard mode preserves excluded-only runs and never auto-loads a policy", async () => {
+  const contract = {
+    version: 2,
+    project: "excluded-only",
+    commands: {},
+    gates: {},
+    oracles: {},
+    acceptanceCriteria: [{ id: "AC-excluded", class: "excluded", severity: "minor", reason: "Owned elsewhere" }],
+  };
+  const cwd = createProject(contract);
+  writeFileSync(join(cwd, ".dogfood", "dogfood.policy.yaml"), "this: would-be-invalid-if-loaded\n");
+  const { report } = await runDogfood({ cwd });
+  assert.equal(report.profile, "standard");
+  assert.equal(report.verdict, "PASS", JSON.stringify(report.hardFails));
+  assert.equal(report.acceptanceCriteria[0].verdict, "excluded");
 });
 
 test("an empty contract is an ordinary validation FAIL with failing JUnit", async () => {
   const cwd = createProject();
   writeFileSync(join(cwd, ".dogfood", "dogfood.contract.yaml"), "", "utf8");
   const { report, artifactDir } = await runDogfood({ cwd, validateOnly: true });
-  assert.equal(report.verdict, "FAIL");
+  assert.equal(report.verdict, "INVALID");
   assert.ok(report.validation.errors.length > 0);
   assert.match(readFileSync(join(artifactDir, "junit.xml"), "utf8"), /<failure/);
 });
@@ -37,6 +56,7 @@ test("a passing run emits the complete portable artifact bundle", async () => {
     "matrix.json",
     "junit.xml",
     "manifest.json",
+    "contract.original.yaml",
     "contract.snapshot.yaml",
     "commands/proof/metadata.json",
     "commands/proof/stdout.log",
@@ -50,7 +70,8 @@ test("a passing run emits the complete portable artifact bundle", async () => {
     manifest.checksums["summary.json"],
     createHash("sha256").update(readFileSync(join(artifactDir, "summary.json"))).digest("hex"),
   );
-  assert.equal(manifest.package.version, "0.2.0");
+  assert.equal(manifest.version, 3);
+  assert.equal(manifest.package.version, "0.3.0");
   const latest = JSON.parse(readFileSync(join(cwd, "artifacts", "dogfood", "latest.json")));
   assert.equal(latest.path, report.runId);
   assert.equal(latest.path.startsWith("/"), false);
@@ -123,7 +144,7 @@ test("the CLI timeout override is a ceiling and cannot extend command timeouts",
   });
   const { report } = await runDogfood({ cwd: createProject(contract), timeoutMs: 20 });
   assert.equal(report.verdict, "INFRA_ERROR");
-  assert.equal(report.commands[0].timeoutMs, 20);
+  assert.equal(report.commands.find((command) => command.name === "proof").timeoutMs, 20);
 });
 
 test("required build identity failures cannot be accepted", async () => {
@@ -152,7 +173,7 @@ test("a verification command that mutates tracked state fails", async () => {
   );
   const { report } = await runDogfood({ cwd });
   assert.equal(report.verdict, "FAIL");
-  assert.ok(report.commands[0].mutationDetected);
+  assert.ok(report.commands.find((command) => command.name === "proof").mutationDetected);
   assert.ok(report.hardFails.some((problem) => problem.kind === "mutation"));
 });
 
@@ -204,7 +225,7 @@ test("v1 runs fail with migration guidance and --write migration creates a backu
   };
   const cwd = createProject(v1);
   const before = await runDogfood({ cwd, validateOnly: true });
-  assert.equal(before.report.verdict, "FAIL");
+  assert.equal(before.report.verdict, "INVALID");
   assert.match(before.report.validation.errors[0], /dogfood migrate/);
 
   const contractPath = join(cwd, ".dogfood", "dogfood.contract.yaml");
@@ -229,4 +250,14 @@ test("init installs equivalent skills without overwriting existing agent files",
     readFileSync(join(target, ".dogfood", "dogfood.contract.yaml"), "utf8"),
   );
   assert.equal(validateContract(initialized).ok, false);
+});
+
+test("authoritative init installs explicit protected-policy and CODEOWNERS templates", async () => {
+  const cwd = createProject();
+  const target = join(cwd, "authoritative-init");
+  const result = await initProject(target, { authoritative: true });
+  assert.ok(existsSync(result.policyPath));
+  assert.ok(existsSync(join(target, ".dogfood", "CODEOWNERS.fragment")));
+  const policy = (await import("yaml")).parse(readFileSync(result.policyPath, "utf8"));
+  assert.equal(policy.profile, "authoritative");
 });
