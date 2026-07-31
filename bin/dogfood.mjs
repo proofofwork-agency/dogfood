@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { ContractInputError, findContractPath } from "../src/load-contract.mjs";
 import { migrateContractFile, MigrationError } from "../src/migrate.mjs";
 import { exitCodeForVerdict, initProject, PACKAGE_ROOT, runDogfood } from "../src/run.mjs";
@@ -255,7 +255,17 @@ function inside(root, candidate) {
   return candidate === root || candidate.startsWith(prefix);
 }
 
-const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : null;
-if (invokedPath === import.meta.url) {
+const invokedPath = realPathOrNull(process.argv[1]);
+const modulePath = realPathOrNull(fileURLToPath(import.meta.url));
+if (invokedPath && invokedPath === modulePath) {
   process.exitCode = await main();
+}
+
+function realPathOrNull(value) {
+  if (!value) return null;
+  try {
+    return realpathSync(resolve(value));
+  } catch {
+    return null;
+  }
 }
