@@ -2,8 +2,19 @@
 
 Dogfood is a final verification checkpoint that you add after implementation:
 
-```text
-Plan -> implement the work -> run Dogfood -> PASS or FAIL -> save the evidence
+```mermaid
+flowchart LR
+    A[Plan] --> B[Implement the work]
+    B --> C[Run Dogfood]
+    D[Architecture checks] --> C
+    E[Tests, build, and types] --> C
+    F[Playwright journeys] --> C
+    C --> G{Verdict}
+    G -->|PASS| H[Complete work and save evidence]
+    G -->|FAIL| I[Fix the work]
+    G -->|INFRA_ERROR| J[Fix the environment]
+    I --> C
+    J --> C
 ```
 
 You configure the checks that matter to your project: architecture rules, unit or integration tests, builds, type checks, security checks, and exact Playwright user journeys. Dogfood runs those checks, connects their results to your acceptance criteria, and blocks the workflow when the required proof is missing or failing. It also produces a report showing exactly what passed and failed.
