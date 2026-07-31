@@ -1,6 +1,19 @@
 # @proofofwork-agency/dogfood
 
-Dogfood v2 is a portable evidence gate. It proves named commands and exact Playwright-tagged acceptance criteria, records repository identity and mutation safety, and emits an auditable artifact bundle.
+Dogfood is a standalone CLI that answers one release question: **does this exact checkout contain enough evidence to call the work done?**
+
+A green shell command alone does not show which acceptance criterion was proved, whether the expected browser test actually ran, or whether verification changed the code it inspected. Dogfood closes that gap with a versioned YAML contract. The contract declares the acceptance criteria, the commands that verify them, and the evidence adapter used to evaluate each result.
+
+When you run `dogfood run`, it:
+
+- validates the contract and fails closed on missing or broken oracle mappings;
+- runs your existing test, architecture, build, or verification commands;
+- treats an `exit-code` command as proof only for that complete named command;
+- reads Playwright JSON and requires every test with the exact configured `@dogfood:AC-ID` tag to pass on its first attempt;
+- records Git identity and fails if verification changes tracked project files; and
+- produces portable JSON, Markdown, JUnit, logs, checksums, and an acceptance-criteria matrix for review or CI.
+
+Dogfood is not a test framework, code generator, or repair agent. It orchestrates evidence produced by tools you already use and never edits product code to make a run pass. It also does not require Claude, Codex, ContextRelay, or any other agent: a human, CI job, Claude, or Codex all run the same CLI. Agent or human browser reviews can be attached as advisory receipts, but they never replace deterministic proof or change the hard verdict.
 
 The package is intentionally private and unpublished on npm while v2 is validated. Install an exact public Git revision:
 
