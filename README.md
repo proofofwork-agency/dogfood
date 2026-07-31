@@ -322,7 +322,25 @@ Protected pull-request and merge-group runs pass the base commit through `--base
 
 After the implementation is merged and the check name has appeared on `main`, protect the branch with required pull requests, one code-owner approval, stale-approval dismissal, approval after the latest push, up-to-date `dogfood / prove-it`, administrator enforcement, conversation resolution, and linear history. Keep force pushes and branch deletion disabled. Tag `v0.3.0` only on the exact clean public commit whose authoritative bundle verified successfully; branch protection and tagging are repository-owner actions, not runner side effects.
 
-The nightly `schedule` is optional. Pull requests and merge queues should remain the authoritative completion gate; a nightly run is useful for detecting environmental drift or failures caused by newly changed dependencies.
+#### Nightly schedule (optional drift detector)
+
+Pull requests and merge queues remain the authoritative completion gate. A nightly `schedule` is useful for catching environmental drift, flaky dependencies, or runner image changes without waiting for the next PR.
+
+The default template and this repository's workflow include:
+
+```yaml
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Optional drift detector (UTC). PRs and merge queues remain the merge gate.
+    - cron: "17 2 * * *"
+```
+
+That cron runs daily at 02:17 UTC (the odd minute reduces load at the top of the hour). Scheduled runs use the default branch tip and do **not** pass `--baseline-ref` (there is no PR base SHA), so they re-prove the current contract rather than checking baseline regressions. Delete the `schedule` block if you do not want recurring Actions usage.
 
 ### Claude Code: session loop or durable routine
 
