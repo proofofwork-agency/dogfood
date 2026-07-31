@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { createReadStream, lstatSync, readlinkSync, realpathSync } from "node:fs";
+import { createReadStream, lstatSync, readlinkSync } from "node:fs";
 import { resolve } from "node:path";
-import { normalizeGitPath, portableRelative } from "./files.mjs";
+import { normalizeGitPath, portableRelative, tryRealpath } from "./files.mjs";
 
 export async function captureRepositoryState(cwd, { authoritative = false } = {}) {
   const rootResult = gitSmall(cwd, ["rev-parse", "--show-toplevel"]);
@@ -10,8 +10,8 @@ export async function captureRepositoryState(cwd, { authoritative = false } = {}
     return unavailable(cleanError(rootResult.stderr) || "not inside a Git working tree");
   }
 
-  const root = realpathSync(normalizeGitPath(rootResult.stdout.trim()));
-  const scope = authoritative ? root : realpathSync(resolve(cwd));
+  const root = tryRealpath(normalizeGitPath(rootResult.stdout.trim()));
+  const scope = authoritative ? root : tryRealpath(resolve(cwd));
   const pathspec = authoritative ? [] : ["--", "."];
   const headResult = gitSmall(root, ["rev-parse", "HEAD"]);
   const [statusResult, trackedStatusResult, diffResult, untrackedResult] = await Promise.all([

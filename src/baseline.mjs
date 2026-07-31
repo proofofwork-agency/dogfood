@@ -1,8 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
 import { extname } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { isPathInside, normalizeGitPath, portableRelative } from "./files.mjs";
+import { isPathInside, normalizeGitPath, portableRelative, tryRealpath } from "./files.mjs";
 import { validateContract } from "./validate.mjs";
 
 export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
@@ -19,7 +18,7 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
     result.errors.push(`could not locate Git root for baseline ${ref}: ${clean(rootResult.stderr)}`);
     return result;
   }
-  const root = realpathSync(normalizeGitPath(rootResult.stdout.trim()));
+  const root = tryRealpath(normalizeGitPath(rootResult.stdout.trim()));
   if (!isPathInside(root, contractPath)) {
     result.errors.push("authoritative contract must be inside the Git repository");
     return result;

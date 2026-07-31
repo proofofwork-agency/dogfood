@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -69,7 +69,7 @@ export function validateProtectedPaths(cwd, paths) {
   if (rootResult.status !== 0) return { ok: false, errors: ["authoritative policy requires a Git working tree"] };
   let root;
   try {
-    root = realpathSync(normalizeGitPath(rootResult.stdout.trim()));
+    root = tryRealpath(normalizeGitPath(rootResult.stdout.trim()));
   } catch (error) {
     return { ok: false, errors: [`could not resolve Git root (${rootResult.stdout.trim()}): ${error.message}`] };
   }
@@ -81,8 +81,7 @@ export function validateProtectedPaths(cwd, paths) {
         continue;
       }
       if (!isPathInside(root, path)) {
-        const detail = `gitRoot=${root}; path=${tryRealpath(path)}; gitOut=${JSON.stringify(rootResult.stdout.trim())}`;
-        errors.push(`authoritative ${label} must be inside the Git repository (${detail})`);
+        errors.push(`authoritative ${label} must be inside the Git repository`);
       }
     } catch (error) {
       errors.push(`could not inspect authoritative ${label}: ${error.message}`);

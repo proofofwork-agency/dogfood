@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify as stringifyYaml } from "yaml";
+import { tryRealpath } from "../src/files.mjs";
 
 export function validContract(overrides = {}) {
   const contract = {
@@ -80,8 +81,8 @@ export function createProject(contract = validContract(), files = {}) {
   git(directory, ["config", "user.name", "Dogfood Tests"]);
   git(directory, ["add", "."]);
   git(directory, ["commit", "-qm", "fixture"]);
-  // Canonicalize so Git's Windows path forms and Node resolve() agree in tests.
-  return realpathSync(directory);
+  // Expand Windows 8.3 short names so Git long paths and Node paths agree.
+  return tryRealpath(directory);
 }
 
 export function git(cwd, args) {
