@@ -217,12 +217,14 @@ test("v1 runs fail with migration guidance and --write migration creates a backu
 test("init installs equivalent skills without overwriting existing agent files", async () => {
   const cwd = createProject();
   const target = join(cwd, "initialized");
-  const existing = join(target, ".codex", "skills", "dogfood", "SKILL.md");
-  mkdirSync(join(target, ".codex", "skills", "dogfood"), { recursive: true });
+  const existing = join(target, ".agents", "skills", "dogfood", "SKILL.md");
+  mkdirSync(join(target, ".agents", "skills", "dogfood"), { recursive: true });
   writeFileSync(existing, "custom skill\n", "utf8");
-  await initProject(target);
+  const result = await initProject(target);
   assert.ok(existsSync(join(target, ".claude", "skills", "dogfood", "SKILL.md")));
+  assert.ok(result.skillDests.includes(existing));
   assert.equal(readFileSync(existing, "utf8"), "custom skill\n");
+  assert.equal(existsSync(join(target, ".codex", "skills", "dogfood", "SKILL.md")), false);
   const initialized = (await import("yaml")).parse(
     readFileSync(join(target, ".dogfood", "dogfood.contract.yaml"), "utf8"),
   );

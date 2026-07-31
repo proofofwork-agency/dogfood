@@ -4,16 +4,58 @@ Dogfood is a standalone CLI that answers one release question: **does this exact
 
 A green shell command alone does not show which acceptance criterion was proved, whether the expected browser test actually ran, or whether verification changed the code it inspected. Dogfood closes that gap with a versioned YAML contract. The contract declares the acceptance criteria, the commands that verify them, and the evidence adapter used to evaluate each result.
 
-When you run `dogfood run`, it:
+Dogfood can be run directly by a developer or CI job. Claude Code and Codex can also operate it through generated project skills, but no agent is required and an agent's opinion can never replace deterministic evidence.
 
-- validates the contract and fails closed on missing or broken oracle mappings;
-- runs your existing test, architecture, build, or verification commands;
-- treats an `exit-code` command as proof only for that complete named command;
-- reads Playwright JSON and requires every test with the exact configured `@dogfood:AC-ID` tag to pass on its first attempt;
-- records Git identity and fails if verification changes tracked project files; and
-- produces portable JSON, Markdown, JUnit, logs, checksums, and an acceptance-criteria matrix for review or CI.
+## What Dogfood does
+
+Dogfood sits above the verification tools a project already has. It does not replace unit tests, architecture checks, build scripts, or Playwright; it runs them under an explicit proof contract and records what they actually establish.
+
+The core contract concepts are:
+
+| Concept | Purpose |
+|---|---|
+| `commands` | Trusted shell commands that perform verification. |
+| `gates` | Explicit must-run command groups. A gated command can fail the project even when it is not mapped to one acceptance criterion. |
+| `oracles` | The evidence source for an acceptance criterion: a complete command, an exact Playwright tag, or an advisory review. |
+| `acceptanceCriteria` | The claims being evaluated and the oracle assigned to each claim. |
+| adapters | The code that interprets command evidence. V2 includes `exit-code` and `playwright-json`. |
+
+The proof flow is:
+
+```text
+acceptance criteria -> declared oracles -> commands -> evidence adapters
+                                                        |
+                                                        v
+                                    AC matrix + PASS/FAIL + artifact bundle
+```
+
+When you run `dogfood run`, Dogfood:
+
+1. Loads and validates `.dogfood/dogfood.contract.yaml`. Missing or broken oracle mappings fail before proof execution.
+2. Captures the Git commit and initial tracked repository state.
+3. Runs each required command once, with its configured timeout and without automatic retries or repair.
+4. Evaluates the evidence. An `exit-code` adapter proves only that the complete named command passed. A `playwright-json` adapter proves the exact configured `@dogfood:AC-ID` tests ran and passed on their first attempt.
+5. Compares tracked repository state before and after verification. A command that changes tracked files fails the run.
+6. Scores every acceptance criterion and classifies the overall result as `PASS`, `FAIL`, or `INFRA_ERROR`.
+7. Writes a portable evidence bundle containing the contract snapshot, command logs, adapter evidence, AC matrix, JUnit, checksums, environment metadata, and human-readable summary.
 
 Dogfood is not a test framework, code generator, or repair agent. It orchestrates evidence produced by tools you already use and never edits product code to make a run pass. It also does not require Claude, Codex, ContextRelay, or any other agent: a human, CI job, Claude, or Codex all run the same CLI. Agent or human browser reviews can be attached as advisory receipts, but they never replace deterministic proof or change the hard verdict.
+
+### What a PASS means
+
+A `PASS` means the contract was valid, every required project command passed, every deterministic acceptance criterion received its configured evidence, required exact Playwright tags passed without retry, the required build identity was available, and no tracked mutation was detected inside the configured workspace.
+
+A `PASS` does **not** mean that:
+
+- Dogfood proved requirements that were never declared in the contract;
+- a judgmental usability or design review was satisfied;
+- untracked cache or screenshot files were absent;
+- tracked files outside the configured `--cwd` scope were unchanged; or
+- `minor` deterministic criteria were ignored. All deterministic severities block in v2.
+
+## Quick start
+
+### 1. Install an exact revision
 
 The package is intentionally private and unpublished on npm while v2 is validated. Install an exact public Git revision:
 
@@ -23,6 +65,131 @@ npx dogfood version
 ```
 
 For local development, `npm install --save-dev /absolute/path/to/dogfood` also works. `private: true` prevents accidental npm publication; it does not prevent local-path or Git dependency installation.
+
+### 2. Initialize the project
+
+Run this from the Git repository or package directory you want Dogfood to verify:
+
+```bash
+npx dogfood init
+```
+
+Initialization creates:
+
+```text
+.dogfood/dogfood.contract.yaml               # intentionally incomplete proof contract
+.dogfood/README.md                            # local setup reminder
+.dogfood/gitignore.fragment                   # artifact ignore rule to merge
+.dogfood/github-workflow.dogfood.yml          # optional GitHub Actions example
+.claude/skills/dogfood/SKILL.md               # Claude Code project skill
+.agents/skills/dogfood/SKILL.md               # Codex project skill
+artifacts/dogfood/                             # evidence output root
+```
+
+The generated contract is intentionally unable to pass. This prevents a newly initialized project from reporting success before its real commands and acceptance criteria have been mapped. Existing agent skill files are preserved unless you explicitly use `--force`.
+
+Merge the contents of `.dogfood/gitignore.fragment` into the project's `.gitignore` so generated evidence does not pollute normal commits.
+
+### 3. Map the real proof
+
+Edit `.dogfood/dogfood.contract.yaml` and replace the placeholder with the project's actual verification commands. For every in-scope deterministic criterion:
+
+1. Give the criterion a stable ID such as `AC-checkout`.
+2. Declare the command that produces its evidence.
+3. Select `exit-code` for a complete generic command or `playwright-json` for exact browser-test evidence.
+4. Declare an oracle that references the command.
+5. Point the acceptance criterion at that oracle.
+6. For Playwright, tag the test with the exact corresponding tag, for example `@dogfood:AC-checkout`.
+
+Do not map a broad browser command through `exit-code` when the claim requires proof of one specific user journey. A successful Playwright process is not proof that the expected tagged test existed or ran.
+
+### 4. Validate, run, and read the report
+
+```bash
+npx dogfood validate
+npx dogfood run
+npx dogfood report
+```
+
+`validate` checks schema and mappings only. It reports deterministic criteria as not run and never pretends the commands executed. `run` executes the complete proof and returns a process exit code suitable for CI. `report` prints the latest Markdown summary.
+
+The machine-readable pointer is `artifacts/dogfood/latest.json`; it points to the latest run directory using relative paths.
+
+## Use Dogfood with Claude Code and Codex
+
+Claude and Codex are **operators of the same independent CLI**, not alternative evidence engines. The generated skills teach each agent when to validate, when to run, where to read the result, and what it must not do during verification.
+
+The skills are optional convenience and policy layers:
+
+- Dogfood still works if neither agent is installed.
+- Claude and Codex execute the same `dogfood` binary and receive the same verdict.
+- The skills do not grant a PASS, weaken a criterion, retry flaky evidence, or repair code during a proof run.
+- After `dogfood init`, start a new agent session if the newly created skill does not appear immediately.
+
+### Claude Code
+
+Dogfood installs a project skill at `.claude/skills/dogfood/SKILL.md`. Claude Code discovers project skills from `.claude/skills`; the directory name makes this skill available as `/dogfood`. See the official [Claude Code skills documentation](https://code.claude.com/docs/en/slash-commands).
+
+Start Claude Code from the project repository, then invoke the skill explicitly:
+
+```text
+/dogfood Run the deterministic acceptance gate for the current implementation. Do not repair anything during the run. Report the verdict, failing ACs, and evidence path.
+```
+
+You can also ask naturally because the skill description allows automatic matching:
+
+```text
+Run Dogfood before we call this work complete. If the contract is invalid, stop and explain the missing mappings. If it runs, summarize the acceptance matrix and link the report.
+```
+
+### Codex
+
+Dogfood installs the equivalent project skill at `.agents/skills/dogfood/SKILL.md`. Codex discovers repository skills from `.agents/skills` and supports explicit `$skill-name` invocation. See the official [Codex skills documentation](https://learn.chatgpt.com/docs/build-skills).
+
+Start Codex from the project repository, then invoke:
+
+```text
+$dogfood Run the deterministic acceptance gate for the current implementation. Do not change product code or tests during verification. Report the verdict, failing ACs, and evidence path.
+```
+
+The same workflow can be requested in plain language:
+
+```text
+Use the Dogfood evidence gate now. Validate first, run only when mappings are valid, then read artifacts/dogfood/latest.json and summarize what was actually proved.
+```
+
+### What the agent should do with each result
+
+Whether Claude or Codex runs the gate, the expected workflow is the same:
+
+| Result | Agent behavior |
+|---|---|
+| Contract validation failure | Stop. Report the invalid or missing mapping. Do not claim tests ran. |
+| `PASS` | Report the deterministic AC matrix and preserve/link the evidence directory for the candidate commit. |
+| `FAIL` | Report the failed commands and criteria. Fix the product or refine an incorrect criterion in a separate workflow, then start a fresh complete Dogfood run. |
+| `INFRA_ERROR` | Recover the environment without changing the proof contract, then start a fresh complete run. |
+
+The no-repair rule applies **during** the proof run. After a `FAIL`, an agent may use the report to implement a fix in a separate step; it must then rerun the whole gate rather than reusing partial evidence.
+
+### Advisory browser reviews from an agent
+
+Claude, Codex, another browser agent, or a human may perform a qualitative review and write an advisory receipt. Dogfood does not launch that review automatically. The reviewer must save the receipt and referenced artifacts inside the project workspace, after which the receipt can be attached:
+
+```bash
+npx dogfood run --evidence reviews/AC-usability.receipt.json
+```
+
+This is useful for usability, visual quality, or clarity observations that are not deterministic. An advisory `satisfied` assessment is visible in the report but cannot make a failed hard gate pass. A `concern` assessment is also visible but does not change a deterministic PASS into FAIL.
+
+### Use without generated skills
+
+An agent does not need the generated skill if you provide the operating instructions directly. The minimum safe prompt is:
+
+```text
+Run `npx dogfood validate`. If it passes, run `npx dogfood run`. Do not edit code or tests during the run. Read `artifacts/dogfood/latest.json` and its summary, then report PASS, FAIL, or INFRA_ERROR with the failing criteria and evidence path.
+```
+
+This is functionally the same CLI workflow; the checked-in skills simply make the policy reusable across sessions and team members.
 
 ## Requirements
 

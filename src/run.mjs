@@ -244,7 +244,7 @@ export async function initProject(cwd, { force = false } = {}) {
   const templateSkill = join(PACKAGE_ROOT, "templates", "skill", "SKILL.md");
   const skillDests = [
     join(root, ".claude", "skills", "dogfood", "SKILL.md"),
-    join(root, ".codex", "skills", "dogfood", "SKILL.md"),
+    join(root, ".agents", "skills", "dogfood", "SKILL.md"),
   ];
   for (const destination of skillDests) copyTemplate(templateSkill, destination, force);
 
