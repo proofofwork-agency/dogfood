@@ -4,7 +4,7 @@ import {
   mkdirSync,
   readFileSync,
 } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify as stringifyYaml } from "yaml";
 import { collectAdvisoryEvidence } from "./advisory.mjs";

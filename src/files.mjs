@@ -31,12 +31,23 @@ export function atomicWriteJson(path, value) {
   atomicWriteFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+/** Convert Git-for-Windows / MSYS absolute paths into Node-usable paths. */
+export function normalizeGitPath(value) {
+  const trimmed = String(value || "").trim().replaceAll("\\", "/");
+  // /c/Users/... or //c/Users/... (MSYS style from some Git builds)
+  const msys = trimmed.match(/^\/{1,2}([A-Za-z])\/(.*)$/);
+  if (process.platform === "win32" && msys) {
+    return `${msys[1].toUpperCase()}:/${msys[2]}`;
+  }
+  return trimmed;
+}
+
 /** Resolve to the canonical absolute path when possible. */
 export function tryRealpath(path) {
   try {
-    return realpathSync(path);
+    return realpathSync(normalizeGitPath(path));
   } catch {
-    return resolve(path);
+    return resolve(normalizeGitPath(path));
   }
 }
 

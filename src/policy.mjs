@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { parse as parseYaml } from "yaml";
-import { isPathInside } from "./files.mjs";
+import { isPathInside, normalizeGitPath, tryRealpath } from "./files.mjs";
 import { ContractInputError } from "./load-contract.mjs";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -61,9 +61,18 @@ export function defaultPolicyPath() {
 }
 
 export function validateProtectedPaths(cwd, paths) {
-  const rootResult = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+  const rootResult = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, MSYS_NO_PATHCONV: "1" },
+  });
   if (rootResult.status !== 0) return { ok: false, errors: ["authoritative policy requires a Git working tree"] };
-  const root = realpathSync(rootResult.stdout.trim());
+  let root;
+  try {
+    root = realpathSync(normalizeGitPath(rootResult.stdout.trim()));
+  } catch (error) {
+    return { ok: false, errors: [`could not resolve Git root (${rootResult.stdout.trim()}): ${error.message}`] };
+  }
   const errors = [];
   for (const [label, path] of Object.entries(paths)) {
     try {
@@ -72,7 +81,8 @@ export function validateProtectedPaths(cwd, paths) {
         continue;
       }
       if (!isPathInside(root, path)) {
-        errors.push(`authoritative ${label} must be inside the Git repository`);
+        const detail = `gitRoot=${root}; path=${tryRealpath(path)}; gitOut=${JSON.stringify(rootResult.stdout.trim())}`;
+        errors.push(`authoritative ${label} must be inside the Git repository (${detail})`);
       }
     } catch (error) {
       errors.push(`could not inspect authoritative ${label}: ${error.message}`);
