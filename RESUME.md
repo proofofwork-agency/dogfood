@@ -78,7 +78,7 @@ Run `p15.js`.
   **The trust model is the whole feature.** A public key embedded in the manifest is worthless — whoever regenerates the manifest regenerates the keypair. Only `verify --key <externally trusted anchor>` proves provenance; bare `verify` must report *present-but-unverified* and never upgrade the verdict. Get this wrong and signing is strictly worse than none.
   **Also update the integrity notice** at `src/report.mjs:202` and `src/verify.mjs:7` — both still say *"signing is deferred"*, which becomes false.
 - **JUnit-XML adapter** — binds an AC to a named testcase (`classname` + `name`), covering pytest/Vitest/Go. Additive enum member, contract stays v2. A selector matching nothing must **FAIL** — that's the `--grep`-matched-nothing false green. No stdout fallback.
-- **Publish prep** — drop `private: true`, `docs/` into `files[]`, `publishConfig.access: public`, `prepublishOnly`, `action.yml`, `RELEASE.md`. **Prepare only.**
+- **Publish prep** — drop `private: true`, bump to `0.4.0`, `publishConfig.access: public`, `prepublishOnly`, `action.yml`. **Prepare only.** (`docs/` is already in `files[]`; `RELEASE.md` already exists at `f719a5c` and lists the eight blockers — update its status header as they clear.)
 
 ### P2 — docs (PARTIAL — `aadd335`)
 **Already landed:** `test/docs.test.mjs` (the gate), the nine `docs/*.md` reference files, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `docs/` added to `files[]`.
