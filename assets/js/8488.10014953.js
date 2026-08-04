@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunk_proofofwork_agency_dogfood_website=self.webpackChunk_proofofwork_agency_dogfood_website||[]).push([[8488],{8488(e,o,r){r.d(o,{createArchitectureServices:()=>c.S});var c=r(9221);r(1400)}}]);
