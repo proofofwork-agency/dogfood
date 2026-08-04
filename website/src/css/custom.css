@@ -148,6 +148,19 @@ body {
   color: var(--df-dim);
 }
 
+@media (max-width: 996px) {
+  .markdown table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .markdown {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
 code {
   border-color: var(--df-line);
 }

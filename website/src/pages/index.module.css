@@ -25,7 +25,10 @@
   padding: 0 1.5rem;
 }
 
-.heroCopy { max-width: 33rem; }
+.heroCopy {
+  min-width: 0;
+  max-width: 33rem;
+}
 
 .eyebrow {
   margin: 0 0 1.5rem;
@@ -104,10 +107,12 @@
   border: 1px solid var(--df-line);
   background: var(--df-panel-2);
   font-size: 0.8rem;
+  overflow-wrap: anywhere;
 }
 
 .heroPanel {
   display: flex;
+  min-width: 0;
   justify-content: flex-end;
 }
 
@@ -214,7 +219,7 @@
 }
 
 @media (max-width: 996px) {
-  .heroGrid { grid-template-columns: 1fr; gap: 2.75rem; }
+  .heroGrid { grid-template-columns: minmax(0, 1fr); gap: 2.75rem; }
   .heroPanel { justify-content: flex-start; }
   .hero { padding: 3.5rem 0 3rem; }
   .row { grid-template-columns: 1fr; gap: 0.35rem; }

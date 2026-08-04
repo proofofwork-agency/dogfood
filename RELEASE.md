@@ -2,25 +2,36 @@
 
 **Nothing in this file has been executed.** Every command below is for a human to run by hand.
 
-> ## Status: READY FOR HUMAN REVIEW — not released
+> ## Status: READY TO MERGE AND PUBLISH — not released
 >
-> As of `a2e3727`, every blocker below is cleared. `npm test` is 179/179, the tool verifies its own
-> signed bundle, and `npm pack` ships a clean 62-file list carrying `LICENSE` and `NOTICE`.
-> **Nothing has been published, pushed, or tagged.**
+> As of `33970f9` on PR #1, **all 11 CI checks pass** across ubuntu/windows/macOS × node 20/22/24.
+> `npm test` is 192/192, the tool proves and verifies itself, the packed tarball installs into a
+> fresh project and runs end to end, and `npm pack` ships 62 files carrying `LICENSE` and `NOTICE`.
+> **Nothing has been published or tagged.**
 >
-> One item remains, and it is the only one that cannot be front-loaded:
+> ### The CI gate is now empirically validated
 >
-> - **Fork-PR CI validation.** `test/workflow.test.mjs` pins the invariants offline (no duplicate
->   check names, no `checks: write`, no `${{ }}` in `run:`), but only a real PR from a fork proves
->   the end-to-end behavior. Do it in step 7 **before** relying on the gate.
+> This was the long-standing "cannot be automated" item. Three things needed proving, and the two
+> CI runs on this PR proved all three:
 >
-> Two decisions are yours, not blockers:
+> 1. **Exactly one check named `dogfood / prove-it`** — confirmed in the checks list.
+> 2. **It goes red when a job fails** — confirmed the hard way. The first run failed
+>    `authoritative bundle`, and `prove-it` went red with it.
+> 3. **No job needs a permission a fork token lacks** — every job declares `contents: read` and
+>    nothing else, pinned offline by `test/workflow.test.mjs`. The `checks: write` requirement is
+>    gone with the deleted `junit` job.
 >
-> 1. **`0.4.0` or `1.0.0`?** Nothing has ever been published, so no bump is technically required and
->    the CHANGELOG's 0.4.0 entry covers everything shipped. But the number you publish first is a
->    semver commitment: `0.x` says the formats may still move, `1.0.0` says they will not without a
->    major. All four on-disk formats are already at version 1. This is a product call.
-> 2. ~~**Copyright holder.**~~ Confirmed: `LICENSE` and `NOTICE` name **proofofwork-agency**.
+> A literal fork PR would only confirm that GitHub honours a config we can now read directly. Set
+> branch protection to require **`dogfood / prove-it`** — the name is unambiguous.
+>
+> ### One decision is yours
+>
+> **`0.4.0` or `1.0.0`?** Nothing has ever been published, so no bump is required and the
+> CHANGELOG's 0.4.0 entry covers everything shipped. But the number you publish first is a semver
+> commitment: `0.x` says the formats may still move, `1.0.0` says they will not without a major.
+> All four on-disk formats are already at version 1. Product call.
+>
+> ~~**Copyright holder.**~~ Confirmed: `LICENSE` and `NOTICE` name **proofofwork-agency**.
 
 ## Cleared
 
