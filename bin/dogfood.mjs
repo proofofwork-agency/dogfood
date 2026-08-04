@@ -137,7 +137,7 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     if (args.command === "init") {
       const result = await initProject(args.cwd, { force: args.force, authoritative: args.authoritative });
-      console.log(`Initialized Dogfood v${packageVersion()} (contract v2) in ${args.cwd}`);
+      console.log(`Initialized Dogfood v${packageVersion()} (contract v1) in ${args.cwd}`);
       console.log(`Contract: ${result.contractPath}`);
       if (result.policyPath) console.log(`Authoritative policy: ${result.policyPath}`);
       for (const skill of result.skillDests) console.log(`Agent skill: ${skill}`);

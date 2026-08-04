@@ -351,7 +351,7 @@ export async function initProject(cwd, { force = false, authoritative = false } 
   writeTemplate(join(dogfoodDir, "README.md"), [
     "# Dogfood project gate",
     "",
-    "This directory contains a portable Dogfood v2 proof contract.",
+    "This directory contains a portable Dogfood v1 proof contract.",
     authoritative ? "The explicit policy enables the authoritative profile." : "No policy is installed, so standard compatibility mode is active.",
     "",
     "1. Replace the placeholder command.",

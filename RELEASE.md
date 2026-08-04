@@ -20,9 +20,7 @@
 >    the CHANGELOG's 0.4.0 entry covers everything shipped. But the number you publish first is a
 >    semver commitment: `0.x` says the formats may still move, `1.0.0` says they will not without a
 >    major. All four on-disk formats are already at version 1. This is a product call.
-> 2. **Copyright holder.** `LICENSE` and `NOTICE` now name **Proof of Work Agency**, inferred from
->    the npm scope and GitHub org. Confirm that is the correct legal entity before publishing —
->    changing it after the fact means amending a published licence grant.
+> 2. ~~**Copyright holder.**~~ Confirmed: `LICENSE` and `NOTICE` name **proofofwork-agency**.
 
 ## Cleared
 
