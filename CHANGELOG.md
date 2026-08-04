@@ -113,10 +113,10 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
 
 Package 0.4.0 · contract **v1** · policy **v1** · report and manifest **v1**.
 
-### Deferred to 0.5.0
+### Deferred
 
-- The generic JUnit-XML adapter. It is a new feature, and 0.4.0 is scoped to making the existing
-  claims true.
+Nothing. The JUnit-XML adapter was planned for 0.5.0 and landed here instead, so 0.4.0 is the whole
+of the remediation work.
 
 ## Before 0.4.0
 
