@@ -1,0 +1,141 @@
+name: Dogfood evidence gate
+description: Prove acceptance criteria against exact commands and exact test tags, and emit a tamper-evident bundle.
+author: proofofwork-agency
+
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  contract:
+    description: Path to the contract. Defaults to discovery under .dogfood/.
+    required: false
+  policy:
+    description: Path to an authoritative policy. Policies are never auto-discovered.
+    required: false
+  baseline-ref:
+    description: Git ref to compare the contract against. Requires policy. Values beginning with "-" are rejected.
+    required: false
+  subject:
+    description: Build subject file to bind into the bundle.
+    required: false
+  sign-key:
+    description: Path to an ed25519 private key. Write it from a secret; never commit it.
+    required: false
+  timeout-ms:
+    description: Ceiling applied to every command, in milliseconds.
+    required: false
+  node-version:
+    description: Node version used to run the gate.
+    required: false
+    default: "24"
+  working-directory:
+    description: Directory to run in.
+    required: false
+    default: "."
+  upload-artifact:
+    description: Upload the bundle as a workflow artifact.
+    required: false
+    default: "true"
+  artifact-retention-days:
+    description: Retention for the uploaded bundle.
+    required: false
+    default: "30"
+
+outputs:
+  verdict:
+    description: PASS, FAIL, INFRA_ERROR, VALID, or INVALID.
+    value: ${{ steps.dogfood.outputs.verdict }}
+  run-id:
+    description: The run identifier.
+    value: ${{ steps.dogfood.outputs.run-id }}
+  bundle-path:
+    description: Path to the produced bundle.
+    value: ${{ steps.dogfood.outputs.bundle-path }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    # Every input reaches the shell through env, never through ${{ }} inside run:.
+    # Interpolating directly would let a crafted input close the quoting and run its own command.
+    - name: Validate contract
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CONTRACT: ${{ inputs.contract }}
+        POLICY: ${{ inputs.policy }}
+        BASE_REF: ${{ inputs.baseline-ref }}
+      run: |
+        set -euo pipefail
+        args=()
+        [ -n "$CONTRACT" ] && args+=(--contract "$CONTRACT")
+        [ -n "$POLICY" ]   && args+=(--policy "$POLICY")
+        [ -n "$BASE_REF" ] && args+=(--baseline-ref "$BASE_REF")
+        npx --no-install dogfood validate "${args[@]}"
+
+    - name: Run proof
+      id: dogfood
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CONTRACT: ${{ inputs.contract }}
+        POLICY: ${{ inputs.policy }}
+        BASE_REF: ${{ inputs.baseline-ref }}
+        SIGN_KEY: ${{ inputs.sign-key }}
+        TIMEOUT_MS: ${{ inputs.timeout-ms }}
+      run: |
+        set -uo pipefail
+        args=()
+        [ -n "$CONTRACT" ]   && args+=(--contract "$CONTRACT")
+        [ -n "$POLICY" ]     && args+=(--policy "$POLICY")
+        [ -n "$BASE_REF" ]   && args+=(--baseline-ref "$BASE_REF")
+        [ -n "$SIGN_KEY" ]   && args+=(--sign "$SIGN_KEY")
+        [ -n "$TIMEOUT_MS" ] && args+=(--timeout-ms "$TIMEOUT_MS")
+        npx --no-install dogfood run "${args[@]}"
+        status=$?
+        pointer=artifacts/dogfood/latest.json
+        if [ -f "$pointer" ]; then
+          run_id=$(node -p "JSON.parse(require('fs').readFileSync('$pointer','utf8')).runId")
+          verdict=$(node -p "JSON.parse(require('fs').readFileSync('$pointer','utf8')).verdict")
+          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "bundle-path=artifacts/dogfood/$run_id" >> "$GITHUB_OUTPUT"
+        fi
+        exit $status
+
+    - name: Verify bundle
+      if: always() && steps.dogfood.outputs.bundle-path != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BUNDLE: ${{ steps.dogfood.outputs.bundle-path }}
+        SUBJECT: ${{ inputs.subject }}
+      run: |
+        set -euo pipefail
+        args=()
+        [ -n "$SUBJECT" ] && args+=(--subject "$SUBJECT")
+        npx --no-install dogfood verify "$BUNDLE" "${args[@]}"
+
+    - name: Publish summary
+      if: always() && steps.dogfood.outputs.bundle-path != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BUNDLE: ${{ steps.dogfood.outputs.bundle-path }}
+      run: |
+        set -uo pipefail
+        summary="$BUNDLE/summary.md"
+        if [ -f "$summary" ]; then cat "$summary" >> "$GITHUB_STEP_SUMMARY"; fi
+
+    - name: Upload bundle
+      if: always() && inputs.upload-artifact == 'true' && steps.dogfood.outputs.bundle-path != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: dogfood-evidence
+        path: ${{ inputs.working-directory }}/artifacts/dogfood/
+        retention-days: ${{ inputs.artifact-retention-days }}
+        if-no-files-found: error

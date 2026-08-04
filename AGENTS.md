@@ -4,7 +4,7 @@ Dogfood is a portable evidence gate. The normative operating instructions are in
 
 ## Commands
 
-`dogfood help` · `dogfood version` · `dogfood init` · `dogfood validate` · `dogfood run` · `dogfood verify` · `dogfood report` · `dogfood migrate`
+`dogfood help` · `dogfood version` · `dogfood init` · `dogfood validate` · `dogfood run` · `dogfood verify` · `dogfood report` · `dogfood migrate` · `dogfood keygen`
 
 When `.dogfood/dogfood.policy.yaml` exists, pass it explicitly with `--policy`; policies are not auto-discovered. `artifacts/dogfood/latest.json` selects the latest executed proof, while `latest-validate.json` selects validation-only output.
 
@@ -24,3 +24,7 @@ When `.dogfood/dogfood.policy.yaml` exists, pass it explicitly with `--policy`; 
 4. On INFRA_ERROR, recover the environment and start a fresh complete run.
 
 Judgmental criteria and advisory receipts never change the hard verdict. All deterministic criteria block regardless of severity.
+
+## Signed bundles
+
+`dogfood verify <bundle>` proves internal consistency only. A signature reported as `unverified` is **not** provenance — the public key inside a manifest is not a trust anchor, because whoever regenerates the manifest can regenerate the key. Only `dogfood verify <bundle> --key <key obtained out of band>` establishes origin. Never report a bundle as trusted on the strength of an unchecked signature.

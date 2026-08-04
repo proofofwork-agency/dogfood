@@ -24,14 +24,18 @@ All deterministic criteria block regardless of `severity`. A missing oracle is a
 
 ## Install
 
-The package is private and not published to npm while v0.3 is validated. Install a reviewed Git revision:
-
 ```bash
-npm install --save-dev github:proofofwork-agency/dogfood#<full-commit-sha>
+npm install --save-dev @proofofwork-agency/dogfood
 npx dogfood version
 ```
 
-For repository development, install dependencies in this checkout with `npm ci` and invoke `node bin/dogfood.mjs`.
+Pinning a reviewed Git revision also works, and is what you want if you need a commit that is not yet released:
+
+```bash
+npm install --save-dev github:proofofwork-agency/dogfood#<full-commit-sha>
+```
+
+For work on dogfood itself, run `npm ci` in this checkout and invoke `node bin/dogfood.mjs`.
 
 ## Five-minute setup
 
@@ -126,6 +130,7 @@ See the [complete CLI reference](docs/cli.md) for flags, discovery rules, enviro
 - [Contract reference](docs/contract.md)
 - [Authoritative policy](docs/policy.md)
 - [Artifact bundles and verification](docs/artifacts.md)
+- [Signing and provenance](docs/signing.md)
 - [Playwright evidence](docs/playwright.md)
 - [Advisory receipts](docs/advisory.md)
 - [Continuous integration](docs/ci.md)
