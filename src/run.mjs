@@ -20,6 +20,7 @@ import {
   authoritativeRepositoryProblems,
   captureRepositoryState,
   repositoryStateChanged,
+  summarizeRepository,
 } from "./repository.mjs";
 import { runNamedCommands } from "./run-commands.mjs";
 import { collectCommandsToRun, expectedPlaywrightTags, scoreAcceptanceCriteria } from "./score-ac.mjs";
@@ -122,8 +123,8 @@ export async function runDogfood(options = {}) {
     runtimeProblems.push({ kind: "infra", category: "infrastructure", message: `Git repository state is unavailable: ${repositoryBefore.error}` });
   }
   if (authoritative && repositoryBefore?.available) {
-    for (const message of authoritativeInitialProblems(repositoryBefore, policyDocument.policy.mutation.allowUntracked)) {
-      runtimeProblems.push({ kind: "mutation", category: "product", message });
+    for (const problem of authoritativeInitialProblems(repositoryBefore, policyDocument.policy.mutation.allowUntracked)) {
+      runtimeProblems.push({ kind: "mutation", code: problem.code, category: "product", message: problem.message });
     }
   }
 
@@ -155,6 +156,7 @@ export async function runDogfood(options = {}) {
       identityResult.blocking = Boolean(contract?.build?.requireIdentity) || identityResult.mutationDetected;
       commandResults.push(identityResult);
       if (identityResult.mutationDetected) {
+        // The command's own mutationProblems carry the codes; this entry only names the culprit.
         runtimeProblems.push({ kind: "mutation", category: "product", message: "build identity command changed repository state" });
       }
       if (contract?.build?.requireIdentity && identityResult.status !== "pass") {
@@ -171,11 +173,19 @@ export async function runDogfood(options = {}) {
     }
   }
 
+  // An advisory assessment never moves the verdict, but a malformed --evidence argument is a
+  // usage failure and is never silently dropped. Validate mode executes nothing and expresses
+  // only the validation verdict, so it must not be able to collect a blocking problem it cannot
+  // report: the CLI already refuses --evidence there, and this gate closes the exported API too.
   let advisoryReceipts = [];
-  if (validation.ok && (options.evidence || []).length > 0) {
+  if (validation.ok && !validateOnly && (options.evidence || []).length > 0) {
     const advisory = collectAdvisoryEvidence(options.evidence, { cwd, artifactDir, criteria: contract.acceptanceCriteria });
     advisoryReceipts = advisory.receipts;
-    runtimeProblems.push(...advisory.errors.map((message) => ({ kind: "advisory-evidence", category: "product", message })));
+    runtimeProblems.push(...advisory.errors.map((message) => ({
+      kind: "advisory-input",
+      category: "product",
+      message: `--evidence input rejected: ${message}`,
+    })));
   }
 
   if (validation.ok && !validateOnly) {
@@ -209,10 +219,12 @@ export async function runDogfood(options = {}) {
   if (repositoryBefore?.available && repositoryAfter?.available) {
     const changes = authoritative
       ? authoritativeRepositoryProblems(repositoryBefore, repositoryAfter, policyDocument.policy.mutation.allowUntracked)
-      : repositoryStateChanged(repositoryBefore, repositoryAfter) ? ["tracked repository state changed during verification"] : [];
-    for (const message of changes) {
-      if (runtimeProblems.some((problem) => problem.kind === "mutation" && problem.message === message)) continue;
-      runtimeProblems.push({ kind: "mutation", category: "product", message });
+      : repositoryStateChanged(repositoryBefore, repositoryAfter)
+        ? [{ code: "tracked-state-changed", message: "tracked repository state changed during verification" }]
+        : [];
+    for (const change of changes) {
+      if (runtimeProblems.some((problem) => problem.kind === "mutation" && problem.message === change.message)) continue;
+      runtimeProblems.push({ kind: "mutation", code: change.code, category: "product", message: change.message });
     }
   }
 
@@ -232,8 +244,8 @@ export async function runDogfood(options = {}) {
     acResults,
     advisoryReceipts,
     runtimeProblems,
-    repositoryBefore: summarizeRepository(repositoryBefore),
-    repositoryAfter: summarizeRepository(repositoryAfter),
+    repositoryBefore: summarizeRepository(repositoryBefore, { cwd }),
+    repositoryAfter: summarizeRepository(repositoryAfter, { cwd }),
     validateOnly,
     authoritative,
     policyPath: policyDocument.path,
@@ -364,25 +376,6 @@ function invalidAcceptanceCriteria(contract) {
     verdict: "invalid",
     detail: "contract or policy validation failed; no proof was executed",
   }));
-}
-
-function summarizeRepository(repository) {
-  if (!repository) return null;
-  return {
-    available: repository.available,
-    root: repository.root ? portableRelative(repository.root, repository.root) : null,
-    scope: repository.scope,
-    authoritative: repository.authoritative,
-    head: repository.head,
-    dirty: repository.dirty,
-    trackedDirty: repository.trackedDirty,
-    dirtyStateDigest: repository.dirtyStateDigest,
-    trackedStateDigest: repository.trackedStateDigest,
-    diffDigest: repository.diffDigest,
-    untracked: repository.untracked,
-    ignoredFilesCovered: false,
-    error: repository.error,
-  };
 }
 
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }

@@ -3,6 +3,15 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { atomicWriteFile, atomicWriteJson, isPathInside } from "./files.mjs";
 import { validateAdvisoryReceipt } from "./validate.mjs";
 
+/**
+ * Copies advisory receipts into the bundle.
+ *
+ * Every returned error describes a rejected `--evidence` argument — unreadable, malformed, or
+ * pointed at a criterion the contract does not declare. None of them is an assessment. An
+ * assessment ("satisfied", "concern") is scored in score-ac.mjs and can never move the hard
+ * verdict; a receipt the runner could not even read is a usage failure and is never dropped,
+ * because silently ignoring it would publish a bundle claiming evidence it does not contain.
+ */
 export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = [] }) {
   const receipts = [];
   const errors = [];

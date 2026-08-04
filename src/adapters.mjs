@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
-import { createRedactor, DEFAULT_LOG_POLICY, redactDeep } from "./redact.mjs";
+import { createDocumentRedactor, createRedactor, DEFAULT_LOG_POLICY, redactDeep } from "./redact.mjs";
 
 export const ADAPTER_VERSIONS = Object.freeze({
   "exit-code": "1",
@@ -40,7 +40,7 @@ export function prepareAdapter(name, definition, artifactDir) {
 }
 
 export function evaluateAdapter(definition, processResult, prepared, expectedTags = [], logs = null) {
-  const redactor = createRedactor(logs);
+  const redactor = bundleRedactor(logs);
   let evaluation;
   if (definition.adapter === "exit-code") {
     evaluation = evaluateExitCode(processResult);
@@ -264,6 +264,17 @@ export function evaluatePlaywrightTag(report, tag) {
     detail: `${executions.length} matching execution(s) passed on the first attempt`,
     executions,
   };
+}
+
+/**
+ * One redactor for everything this adapter publishes. A declared literal is a secret in every
+ * capture mode, so the document mask always runs; the log policy adds the environment values.
+ */
+function bundleRedactor(logs) {
+  const documentRedactor = createDocumentRedactor(logs);
+  const logRedactor = createRedactor(logs);
+  if (!documentRedactor.active) return logRedactor;
+  return { apply: (value) => logRedactor.apply(documentRedactor.apply(value)) };
 }
 
 function collectSpecs(report) {

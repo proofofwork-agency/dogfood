@@ -1,36 +1,65 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isPathInside, portableRelative } from "./files.mjs";
 
+/**
+ * Every rejection here becomes report text, so each one names the subject the way the rest of the
+ * report names paths: workspace-relative. A raw fs error message would carry the absolute path of
+ * the machine that ran the proof into a bundle meant to be published.
+ */
 export function inspectBuildSubject(cwd, definition) {
   if (!definition) return { subject: null, error: null };
   if (definition.algorithm !== "sha256") return { subject: null, error: `unsupported build subject algorithm: ${definition.algorithm}` };
+  if (typeof definition.path !== "string" || definition.path.trim() === "") {
+    return { subject: null, error: "build subject path must be a non-empty string" };
+  }
   const workspace = realpathSync(cwd);
   const candidate = resolve(cwd, definition.path);
-  if (!existsSync(candidate)) return { subject: null, error: `build subject does not exist: ${definition.path}` };
+  const label = subjectLabel(workspace, candidate, definition.path);
+  if (!existsSync(candidate)) return { subject: null, error: `build subject does not exist: ${label}` };
   let real;
   try {
-    if (lstatSync(candidate).isSymbolicLink()) return { subject: null, error: `build subject must be a regular file, not a symbolic link: ${definition.path}` };
+    if (lstatSync(candidate).isSymbolicLink()) return { subject: null, error: `build subject must be a regular file, not a symbolic link: ${label}` };
     real = realpathSync(candidate);
   } catch (error) {
-    return { subject: null, error: `could not inspect build subject ${definition.path}: ${error.message}` };
+    return { subject: null, error: `could not inspect build subject ${label}: ${errorCode(error)}` };
   }
   if (!isPathInside(workspace, real)) {
-    return { subject: null, error: `build subject escapes the workspace: ${definition.path}` };
+    return { subject: null, error: `build subject escapes the workspace: ${label}` };
   }
-  const stat = statSync(real);
-  if (!stat.isFile()) return { subject: null, error: `build subject is not a regular file: ${definition.path}` };
+  let stat;
+  let value;
+  try {
+    stat = statSync(real);
+    if (!stat.isFile()) return { subject: null, error: `build subject is not a regular file: ${label}` };
+    value = readFileSync(real);
+  } catch (error) {
+    return { subject: null, error: `could not read build subject ${label}: ${errorCode(error)}` };
+  }
   return {
     subject: {
       path: portableRelative(workspace, real),
       algorithm: "sha256",
-      digest: sha256(readFileSync(real)),
+      digest: sha256(value),
       size: stat.size,
     },
     error: null,
   };
+}
+
+/** Workspace-relative name of a subject that may not exist, escape the workspace, or be absolute. */
+function subjectLabel(workspace, candidate, declared) {
+  const relativeLabel = portableRelative(workspace, candidate);
+  if (relativeLabel && relativeLabel !== "." && !isAbsolute(relativeLabel)) return relativeLabel;
+  // A subject on another Windows drive has no relative form, so only its own name is printable.
+  return String(declared).replaceAll("\\", "/").split("/").filter(Boolean).pop() || "(build subject)";
+}
+
+// fs messages embed the absolute path Node tried; the code alone classifies the failure.
+function errorCode(error) {
+  return error?.code || error?.name || "Error";
 }
 
 export function collectRuntimeMetadata(cwd, repositoryRoot = cwd) {

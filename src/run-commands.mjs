@@ -8,6 +8,7 @@ import {
   authoritativeRepositoryProblems,
   captureRepositoryState,
   repositoryStateChanged,
+  summarizeRepository,
 } from "./repository.mjs";
 
 const MAX_CAPTURE_BYTES = 5 * 1024 * 1024;
@@ -164,8 +165,10 @@ export async function runNamedCommands(
     const authoritativeProblems = authoritative
       ? authoritativeRepositoryProblems(beforeRepository, afterRepository, allowUntracked)
       : [];
+    // A repository that was already dirty before this command started is a problem with the run,
+    // not evidence that this command wrote anything. It is reported by the run, never charged here.
     const mutationDetected = authoritative
-      ? authoritativeProblems.some((message) => !message.includes("started with tracked changes"))
+      ? authoritativeProblems.some((problem) => problem.code !== "initial-tracked-dirty")
       : repositoryStateChanged(beforeRepository, afterRepository);
     const repositoryInspectionFailed = !beforeRepository.available || !afterRepository.available;
     const adapter = evaluateAdapter(
@@ -189,7 +192,8 @@ export async function runNamedCommands(
     }
     if (mutationDetected) {
       status = "fail";
-      detail = authoritativeProblems.join("; ") || "verification command changed tracked repository state";
+      detail = authoritativeProblems.map((problem) => problem.message).join("; ")
+        || "verification command changed tracked repository state";
     }
 
     const result = {
@@ -207,8 +211,8 @@ export async function runNamedCommands(
       mutationDetected,
       mutationProblems: authoritativeProblems,
       repositoryInspectionFailed,
-      repositoryBefore: summarizeRepository(beforeRepository),
-      repositoryAfter: summarizeRepository(afterRepository),
+      repositoryBefore: summarizeRepository(beforeRepository, { cwd }),
+      repositoryAfter: summarizeRepository(afterRepository, { cwd }),
     };
     results.push(result);
     writeCommandLogs(artifactDir, [result], { logs, env: process.env });
@@ -219,8 +223,13 @@ export async function runNamedCommands(
 export function writeCommandLogs(artifactDir, results, { logs = null, env = process.env } = {}) {
   const root = join(artifactDir, "commands");
   mkdirSync(root, { recursive: true });
-  // A secret on a command line is published unless the recorded definition is masked too.
+  // A secret on a command line is published unless the recorded definition is masked too. A
+  // declared literal is masked in every capture mode; the log redactor then covers the values
+  // that only exist in the environment, exactly as it does for the captured output.
   const documentRedactor = createDocumentRedactor(logs);
+  const logRedactor = createRedactor(logs, env);
+  const maskText = (value) => logRedactor.apply(documentRedactor.apply(value));
+  const maskDeep = (value) => redactDeep(redactDeep(value, documentRedactor), logRedactor);
   for (const result of results) {
     const directory = join(root, safeSegment(result.name));
     mkdirSync(directory, { recursive: true });
@@ -229,10 +238,10 @@ export function writeCommandLogs(artifactDir, results, { logs = null, env = proc
     atomicWriteFile(join(directory, "stderr.log"), persisted.stderr, "utf8");
     atomicWriteJson(join(directory, "metadata.json"), {
       name: result.name,
-      definition: redactDeep(result.definition || null, documentRedactor),
-      command: documentRedactor.apply(result.command),
+      definition: maskDeep(result.definition || null),
+      command: maskText(result.command),
       status: result.status,
-      detail: result.detail || null,
+      detail: result.detail ? maskText(result.detail) : null,
       code: result.code,
       signal: result.signal,
       timedOut: result.timedOut,
@@ -246,12 +255,12 @@ export function writeCommandLogs(artifactDir, results, { logs = null, env = proc
       logCapture: persisted.capture,
       redactionApplied: persisted.redactionApplied,
       mutationDetected: result.mutationDetected || false,
-      mutationProblems: result.mutationProblems || [],
+      mutationProblems: maskDeep(result.mutationProblems || []),
       repositoryInspectionFailed: result.repositoryInspectionFailed || false,
       repositoryBefore: result.repositoryBefore || null,
       repositoryAfter: result.repositoryAfter || null,
       evidence: result.evidence || null,
-      adapter: result.adapter || null,
+      adapter: maskDeep(result.adapter || null),
     });
   }
 }
@@ -284,24 +293,6 @@ function terminateTree(pid, signal) {
   } catch (error) {
     if (error?.code !== "ESRCH") return;
   }
-}
-
-function summarizeRepository(repository) {
-  return {
-    available: repository.available,
-    root: repository.root,
-    scope: repository.scope,
-    authoritative: repository.authoritative,
-    head: repository.head,
-    dirty: repository.dirty,
-    trackedDirty: repository.trackedDirty,
-    dirtyStateDigest: repository.dirtyStateDigest,
-    trackedStateDigest: repository.trackedStateDigest,
-    diffDigest: repository.diffDigest,
-    untracked: repository.untracked,
-    ignoredFilesCovered: false,
-    error: repository.error,
-  };
 }
 
 function safeSegment(value) {

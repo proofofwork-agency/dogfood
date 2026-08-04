@@ -13,6 +13,14 @@ export class BundleIntegrityError extends Error {
   }
 }
 
+/** A report whose verdict cannot express the problems it carries; a runner fault, never user input. */
+export class ReportInvariantError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ReportInvariantError";
+  }
+}
+
 export function buildReport({
   contract,
   contractPath,
@@ -68,6 +76,19 @@ export function buildReport({
   }
 
   const uniqueHardFails = deduplicateProblems(hardFails);
+  // A validate report's verdict is the validation verdict alone, so a blocking problem of any
+  // other kind would sit in the bundle behind VALID and exit 0. Callers must not reach here with
+  // one; refusing to emit the report is the only outcome that cannot be mistaken for a pass.
+  if (validateOnly) {
+    const inexpressible = uniqueHardFails.filter((problem) => problem.kind !== "contract");
+    if (inexpressible.length > 0) {
+      throw new ReportInvariantError(
+        `validate mode collected blocking problems its verdict cannot express: ${
+          inexpressible.map((problem) => `${problem.kind}: ${problem.message}`).join("; ")
+        }`,
+      );
+    }
+  }
   const validationVerdict = validation.ok ? "VALID" : "INVALID";
   const proofVerdict = validateOnly || !validation.ok ? "NOT_RUN" : classifyVerdict(uniqueHardFails);
   const verdict = validateOnly ? validationVerdict : validation.ok ? proofVerdict : "FAIL";
@@ -218,6 +239,7 @@ function nextSteps(verdict, hardFails, validateOnly) {
   if (hardFails.some((problem) => problem.kind === "mutation")) steps.push("Remove mutation from verification commands; Dogfood never accepts a self-changing proof.");
   if (hardFails.some((problem) => problem.kind === "command" || problem.kind === "acceptance-criterion")) steps.push("Re-implement against the failing evidence, or re-refine only if the criterion is wrong.");
   if (hardFails.some((problem) => problem.kind === "evidence")) steps.push("Restore exact structured evidence; a successful process without its evidence cannot pass.");
+  if (hardFails.some((problem) => problem.kind === "advisory-input")) steps.push("Fix or drop the rejected `--evidence` receipt; the product code is not what failed here. An advisory assessment never changes the verdict, but an unreadable receipt argument is not silently ignored.");
   steps.push("Do not edit product code or tests inside the verification run to force green.");
   return steps;
 }

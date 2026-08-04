@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  fsyncSync,
   mkdirSync,
   openSync,
   realpathSync,
@@ -14,14 +15,20 @@ import { dirname, relative, resolve, sep } from "node:path";
 // Temp files that exist on disk but have not been renamed or removed yet.
 const pendingTemps = new Set();
 
+/**
+ * Write through a temp sibling so a reader never sees a half-written artifact, and fsync before
+ * the rename so a crash cannot leave a named-but-empty file. The mode is left to the umask: a
+ * bundle is evidence to be collected, and 0600 locks out CI collectors running as another user.
+ */
 export function atomicWriteFile(path, value, encoding = undefined) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   let descriptor;
   pendingTemps.add(temporary);
   try {
-    descriptor = openSync(temporary, "wx", 0o600);
+    descriptor = openSync(temporary, "wx");
     writeFileSync(descriptor, value, encoding);
+    fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
     renameSync(temporary, path);
