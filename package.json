@@ -24,6 +24,7 @@
     "src/",
     "schemas/",
     "templates/",
+    "docs/",
     "examples/minimal/.dogfood/",
     "examples/minimal/checks/",
     "examples/minimal-broken/.dogfood/",
@@ -33,12 +34,15 @@
     "examples/playwright/page.html",
     "examples/playwright/playwright.config.mjs",
     "examples/playwright/server.mjs",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "dogfood": "node bin/dogfood.mjs",
-    "test": "node --test test/adapters.test.mjs test/baseline.test.mjs test/cli.test.mjs test/contract.test.mjs test/files.test.mjs test/integration.test.mjs test/meta.test.mjs test/package-contents.test.mjs test/policy.test.mjs test/report.test.mjs test/runtime.test.mjs test/verify.test.mjs test/workflow.test.mjs",
+    "test": "node --test test/adapters.test.mjs test/baseline.test.mjs test/cli.test.mjs test/contract.test.mjs test/docs.test.mjs test/files.test.mjs test/integration.test.mjs test/meta.test.mjs test/package-contents.test.mjs test/policy.test.mjs test/report.test.mjs test/runtime.test.mjs test/verify.test.mjs test/workflow.test.mjs",
     "test:playwright-fixture": "node test/playwright-fixture.mjs",
     "test:self": "cd examples/minimal && node ../../bin/dogfood.mjs run"
   },
