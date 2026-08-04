@@ -24,8 +24,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        node: [20, 24]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [20, 22, 24]
+        exclude:
+          # Keep the grid at 8 legs: macOS only needs the newest, Windows skips the middle.
+          - { os: macos-latest, node: 20 }
+          - { os: macos-latest, node: 22 }
+          - { os: windows-latest, node: 22 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -44,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 24]
+        node: [20, 22, 24]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -54,8 +59,30 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Resolve Playwright version
+        id: pw
+        shell: bash
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - run: npm run test:playwright-fixture
+      - name: Upload fixture diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-fixture-${{ matrix.node }}
+          path: |
+            examples/playwright/test-results/
+            examples/playwright/artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
 
   authoritative:
     name: authoritative bundle
@@ -72,7 +99,19 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Resolve Playwright version
+        id: pw
+        shell: bash
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - name: Resolve protected baseline
         id: baseline
         shell: bash
@@ -166,6 +205,7 @@ jobs:
         with:
           name: dogfood-evidence
           path: artifacts/dogfood/
+          retention-days: 30
           if-no-files-found: error
 
   prove-it:

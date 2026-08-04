@@ -5,3 +5,7 @@ examples/*/test-results/
 *.tgz
 .contextrelay/
 DOGFOOD-E2E-PANEL-*.md
+
+# Local agent skills are per-developer tooling for another stack; the dogfood-specific
+# agent definitions under .claude/agents/ are tracked deliberately.
+.claude/skills/

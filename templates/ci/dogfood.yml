@@ -38,7 +38,7 @@ jobs:
       - run: npm test
 
   authoritative:
-    name: authoritative bundle / chromium
+    name: authoritative bundle
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -52,8 +52,21 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - name: Install Chromium
+      # Only needed when your contract uses the playwright-json adapter. Delete this
+      # block and the cache above it if every oracle of yours is exit-code or junit-xml.
+      - name: Resolve Playwright version
+        id: pw
+        shell: bash
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - name: Resolve protected baseline
         id: baseline
         shell: bash
@@ -147,6 +160,7 @@ jobs:
         with:
           name: dogfood-evidence
           path: artifacts/dogfood/
+          retention-days: 30
           if-no-files-found: error
 
   prove-it:

@@ -17,6 +17,28 @@ for (const file of WORKFLOWS) {
   const jobs = Object.entries(workflow.jobs ?? {});
   const nodes = walk(workflow);
 
+  test(`${file}: every Chromium install is cached, so a browser download is not paid per leg`, () => {
+    for (const [id, job] of jobs) {
+      const steps = job.steps ?? [];
+      const installs = steps.filter((step) => typeof step.run === "string" && step.run.includes("playwright install"));
+      if (installs.length === 0) continue;
+      const cached = steps.some((step) => typeof step.uses === "string" && step.uses.startsWith("actions/cache@"));
+      assert.ok(cached, `${id} downloads Chromium on every run with no actions/cache step`);
+    }
+  });
+
+  test(`${file}: uploaded artifacts declare a retention window`, () => {
+    for (const [id, job] of jobs) {
+      for (const step of job.steps ?? []) {
+        if (typeof step.uses !== "string" || !step.uses.startsWith("actions/upload-artifact@")) continue;
+        assert.ok(
+          step.with && step.with["retention-days"] !== undefined,
+          `${id} uploads an artifact with no retention-days, so every run is kept for the 90-day default`,
+        );
+      }
+    }
+  });
+
   test(`${file}: job names are unique and no step publishes a check under a job name`, () => {
     const named = jobs.filter(([, job]) => typeof job.name === "string");
     const owners = new Map();
