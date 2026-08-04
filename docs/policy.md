@@ -34,11 +34,20 @@ logs:
   capture: full-redacted
   redactEnv:
     - GITHUB_TOKEN
+    - AWS_ACCESS_KEY_ID
     - "*_TOKEN"
     - "*_SECRET"
     - "*_PASSWORD"
     - "*_KEY"
+    - "*_KEY_ID"
     - "*_CREDENTIAL*"
+    - "*_CONNECTION_STRING"
+    - CONNECTION_STRING
+    - "*_DSN"
+    - DATABASE_URL
+    - "*_URL"
+    - "*_AUTH"
+    - "*_COOKIE"
   redactLiterals: []
 ```
 
@@ -71,7 +80,7 @@ The ref is first resolved to a commit object ID; only that object ID is used to 
 
 `mutation.allowUntracked` uses Git-like portable globs: `*` matches within one path segment, `**` crosses directories, and `?` matches one non-separator character.
 
-Git-ignored files are invisible to this check. The report records `ignoredFilesCovered: false`; do not claim that authoritative mutation detection covers caches or other ignored output.
+Git-ignored files are invisible to this check. The report records `ignoredFilesCovered: false`; this normally includes Dogfood's own `artifacts/dogfood/` evidence tree. Mutation enforcement compares before/after snapshots, so an edit reverted byte-for-byte before the after-snapshot is also outside the guarantee. Do not claim that authoritative mutation detection observes intermediate writes, caches, or other ignored output.
 
 ## Build subject
 
@@ -86,4 +95,3 @@ Git-ignored files are invisible to this check. The report records `ignoredFilesC
 | `logs.redactLiterals` | Exact strings masked in logs and published contract-derived documents. |
 
 Standard runs use the same `full-redacted` defaults shown above even without a policy. Matching environment values that are too short, boolean-like, or small numeric strings are not replaced because they would corrupt unrelated log text. Do not put secrets on command lines and assume an undeclared value will be found: redaction is a containment layer, not a secret-management system.
-

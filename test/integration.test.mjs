@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { stringify as stringifyYaml } from "yaml";
@@ -146,6 +146,23 @@ test("command failures and missing Playwright reports cannot pass", async () => 
   assert.match(result.report.acceptanceCriteria[0].detail, /report is missing/i);
 });
 
+test("a deterministic minor criterion still blocks the hard verdict", async () => {
+  const contract = validContract({
+    commands: {
+      proof: {
+        run: "node -e \"process.exit(1)\"",
+        timeoutMs: 5000,
+        adapter: "exit-code",
+      },
+    },
+  });
+  contract.acceptanceCriteria[0].severity = "minor";
+  const { report } = await runDogfood({ cwd: createProject(contract) });
+  assert.equal(report.verdict, "FAIL");
+  assert.equal(report.acceptanceCriteria[0].verdict, "fail");
+  assert.equal(report.enforcement.severityAffectsVerdict, false);
+});
+
 test("infrastructure blocks criteria and mixed problems produce FAIL", async () => {
   const infraContract = validContract({
     commands: {
@@ -255,6 +272,33 @@ test("advisory concern receipts are copied but do not change PASS", async () => 
   assert.equal(report.advisoryEvidence[0].assessment, "concern");
   assert.ok(existsSync(join(artifactDir, "evidence", "advisory", "receipt-1.json")));
   assert.ok(existsSync(join(artifactDir, "evidence", "advisory", "artifacts", "1", "1-screenshot.txt")));
+});
+
+test("oversized advisory artifacts are rejected instead of read into memory", async () => {
+  const contract = validContract();
+  contract.oracles.review = { kind: "advisory" };
+  contract.acceptanceCriteria.push({
+    id: "AC-usability",
+    class: "judgmental",
+    oracle: "review",
+    severity: "minor",
+  });
+  const cwd = createProject(contract, {
+    "reviews/huge.bin": "",
+    "reviews/receipt.json": JSON.stringify({
+      version: 1,
+      acId: "AC-usability",
+      actor: "human reviewer",
+      driver: "browser-review",
+      assessment: "satisfied",
+      summary: "Oversized attachment",
+      artifacts: ["reviews/huge.bin"],
+    }),
+  });
+  truncateSync(join(cwd, "reviews", "huge.bin"), 25 * 1024 * 1024 + 1);
+  const { report } = await runDogfood({ cwd, evidence: ["reviews/receipt.json"] });
+  assert.equal(report.verdict, "FAIL");
+  assert.ok(report.hardFails.some((problem) => problem.message.includes("per-file limit")));
 });
 
 

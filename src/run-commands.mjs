@@ -12,6 +12,7 @@ import {
 } from "./repository.mjs";
 
 const MAX_CAPTURE_BYTES = 5 * 1024 * 1024;
+const FORCED_CLOSE_GRACE_MS = 2_000;
 
 export function runCommand(
   name,
@@ -37,6 +38,7 @@ export function runCommand(
     let interrupted = false;
     let closeResult = null;
     let forceKillTimer = null;
+    let forceFinishTimer = null;
     let forceSweepDone = false;
 
     const finish = (code, childSignal, error = null) => {
@@ -44,6 +46,7 @@ export function runCommand(
       settled = true;
       clearTimeout(timer);
       if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (forceFinishTimer) clearTimeout(forceFinishTimer);
       signal?.removeEventListener("abort", abort);
       resolvePromise({
         name,
@@ -74,7 +77,22 @@ export function runCommand(
       forceKillTimer = setTimeout(() => {
         terminateTree(child.pid, "SIGKILL");
         forceSweepDone = true;
-        if (closeResult) finish(closeResult.code, closeResult.signal);
+        if (closeResult) {
+          finish(closeResult.code, closeResult.signal);
+          return;
+        }
+        // A setsid grandchild can escape the process group while retaining stdout/stderr. Node then
+        // never emits "close" for the shell even though the process we launched is gone. The gate
+        // still needs a bounded infrastructure verdict rather than hanging for the CI job limit.
+        forceFinishTimer = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish(
+            null,
+            "SIGKILL",
+            new Error("process stdio did not close after forced termination"),
+          );
+        }, FORCED_CLOSE_GRACE_MS);
       }, 500);
     };
     const abort = () => terminate("interrupted");

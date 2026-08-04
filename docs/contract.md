@@ -56,6 +56,8 @@ Each item requires `id`, `class`, and `severity`.
 
 A deterministic criterion with no oracle is a failure, never a skip. It cannot use an advisory oracle. A judgmental criterion must use an advisory oracle. An excluded criterion has no proof and must explain why through `reason`.
 
+The standard profile intentionally has no deterministic-criteria floor for compatibility. A contract containing only judgmental or excluded criteria can therefore execute no proof commands and still have no hard failure. Do not treat that PASS as release evidence; use an authoritative policy with `criteria.minimumDeterministic` and `criteria.requiredGates` for a protected gate.
+
 For a deterministic Playwright criterion, the oracle tag must be exactly `@dogfood:<criterion id>`.
 
 ## Complete Playwright example
@@ -142,4 +144,3 @@ Warnings never affect the verdict. Dogfood records warnings when:
 - a default policy exists but `--policy` was omitted;
 - the optional build identity command does not pass; or
 - a requested baseline has no contract yet and is treated as first adoption.
-

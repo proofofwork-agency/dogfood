@@ -39,6 +39,10 @@ export function validateContract(contract) {
     ? contract.acceptanceCriteria
     : [];
 
+  if (Object.hasOwn(commands, "_build-identity")) {
+    errors.push('commands._build-identity is reserved for Dogfood\'s internal build identity check');
+  }
+
   if (typeof contract.project === "string" && contract.project.trim() === "") {
     errors.push("project must not be blank");
   }

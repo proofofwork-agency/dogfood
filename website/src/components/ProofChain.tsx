@@ -66,8 +66,10 @@ const SCENARIOS: Scenario[] = [
 
 const FRAME_MS = 1150
 
-function reducer(state: { scenario: number; step: number }, action: "tick" | "reset") {
-  if (action === "reset") return { scenario: 0, step: 0 }
+type ProofAction = { type: "tick" } | { type: "select"; scenario: number }
+
+function reducer(state: { scenario: number; step: number }, action: ProofAction) {
+  if (action.type === "select") return { scenario: action.scenario, step: 0 }
   const scenario = SCENARIOS[state.scenario]
   if (state.step < scenario.steps.length) return { ...state, step: state.step + 1 }
   return { scenario: (state.scenario + 1) % SCENARIOS.length, step: 0 }
@@ -87,7 +89,7 @@ export default function ProofChain(): ReactNode {
 
   useEffect(() => {
     if (reduced) return undefined
-    const timer = window.setInterval(() => dispatch("tick"), FRAME_MS)
+    const timer = window.setInterval(() => dispatch({ type: "tick" }), FRAME_MS)
     return () => window.clearInterval(timer)
   }, [reduced])
 
@@ -148,7 +150,7 @@ export default function ProofChain(): ReactNode {
             aria-selected={index === state.scenario}
             aria-label={`Show the ${item.id} run`}
             className={index === state.scenario ? styles.dotActive : styles.dot}
-            onClick={() => dispatch("reset")}
+            onClick={() => dispatch({ type: "select", scenario: index })}
           />
         ))}
       </div>

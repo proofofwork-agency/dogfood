@@ -36,5 +36,6 @@ The path must resolve to a readable JSON file inside the project workspace. Any 
 
 A malformed, unreadable, escaping, or unknown-`acId` receipt is a rejected CLI input and fails the run. That is different from a valid receipt whose assessment is `concern`: the assessment remains advisory and does not flip PASS to FAIL.
 
-Validation mode accepts no `--evidence` flag and never collects receipts because it executes no proof.
+Receipts are limited to 1 MiB. Copied advisory artifacts are limited to 25 MiB per file and 100 MiB total per run; exceeding a limit rejects the evidence input instead of reading an unbounded file into memory.
 
+Validation mode accepts no `--evidence` flag and never collects receipts because it executes no proof.

@@ -53,7 +53,7 @@ jobs:
           cache: npm
       - run: npm ci
       # Only needed when your contract uses the playwright-json adapter. Delete this
-      # block and the cache above it if every oracle of yours is exit-code or junit-xml.
+      # block and the cache above it if every oracle of yours is exit-code.
       - name: Resolve Playwright version
         id: pw
         shell: bash

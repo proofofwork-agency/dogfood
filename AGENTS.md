@@ -10,7 +10,7 @@ When `.dogfood/dogfood.policy.yaml` exists, pass it explicitly with `--policy`; 
 
 ## Exit codes
 
-- 0 — VALID, PASS, or verified bundle
+- 0 — VALID, PASS, or an INTACT/AUTHENTICATED bundle
 - 1 — INVALID, FAIL, input failure, or invalid bundle
 - 2 — INFRA_ERROR
 - 3 — invalid CLI usage

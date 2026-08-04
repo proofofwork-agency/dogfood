@@ -4,23 +4,38 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { sha256 } from "./hash.mjs";
 import { listBundleEntries } from "./report.mjs";
-import { embeddedPublicKey, loadPublicKey, SIGNATURE_FILE, verifyManifestSignature } from "./sign.mjs";
+import { embeddedPublicKey, keyIdFor, loadPublicKey, SIGNATURE_FILE, verifyManifestSignature } from "./sign.mjs";
 
 const NOTICE_UNSIGNED = "Integrity verification proves internal consistency, not cryptographic provenance. A malicious actor can regenerate this unsigned manifest. Sign it with dogfood run --sign to bind it to a key.";
 const NOTICE_UNVERIFIED = "This bundle carries a signature that was NOT checked. The public key recorded inside a manifest is not a trust anchor, because whoever regenerates the manifest can also regenerate the key. Re-run with --key <public key obtained out of band> to establish provenance.";
 const NOTICE_VERIFIED = "The detached signature was verified against the supplied public key, so this bundle came from the holder of that key. Provenance is only as good as your independent trust in the key.";
 const NOTICE_INVALID = "This bundle carries a signature that does NOT match the supplied public key. Either the bundle was altered after signing, or it was signed by someone else. Do not trust it.";
 
-export function verifyBundle(bundleDir, { subject = null, key = null, cwd = process.cwd() } = {}) {
+export function verifyBundle(
+  bundleDir,
+  { subject = null, key = null, cwd = process.cwd(), requireSubject = true } = {},
+) {
   const directory = resolve(cwd, bundleDir);
   const errors = [];
   const warnings = [];
   let signatureStatus = "absent";
   const manifestPath = join(directory, "manifest.json");
   if (!existsSync(manifestPath)) return result(directory, null, ["manifest.json is missing"], warnings);
+  let manifestBytes;
+  try {
+    const stat = lstatSync(manifestPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      return result(directory, null, ["manifest.json is not a regular file"], warnings);
+    }
+    // This exact buffer is both parsed below and checked by the detached signature. Reading the
+    // manifest again after the checksum walk would let a concurrent writer swap the signed bytes.
+    manifestBytes = readFileSync(manifestPath);
+  } catch (error) {
+    return result(directory, null, [`manifest.json could not be read: ${error.message}`], warnings);
+  }
   let manifest;
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
   } catch (error) {
     return result(directory, null, [`manifest.json is invalid JSON: ${error.message}`], warnings);
   }
@@ -97,8 +112,10 @@ export function verifyBundle(bundleDir, { subject = null, key = null, cwd = proc
   }
 
   const declaredSubject = manifest.build?.subject || null;
-  if (declaredSubject && !subject) {
+  if (declaredSubject && !subject && requireSubject) {
     errors.push("bundle declares a build subject; --subject <file> is required for verification");
+  } else if (declaredSubject && !subject) {
+    warnings.push("the recorded build subject was not re-checked against an external file");
   } else if (declaredSubject && subject) {
     const subjectPath = resolve(cwd, subject);
     if (!existsSync(subjectPath) || !statSync(subjectPath).isFile()) {
@@ -113,7 +130,7 @@ export function verifyBundle(bundleDir, { subject = null, key = null, cwd = proc
     errors.push("--subject was supplied but the bundle does not declare a build subject");
   }
 
-  signatureStatus = checkSignature(directory, manifest, key, cwd, errors);
+  signatureStatus = checkSignature(directory, manifest, manifestBytes, key, cwd, errors);
   return result(directory, manifest, errors, warnings, signatureStatus);
 }
 
@@ -121,7 +138,7 @@ export function verifyBundle(bundleDir, { subject = null, key = null, cwd = proc
  * Returns "absent" | "unverified" | "verified". Anything wrong pushes an error and the bundle is
  * INVALID; a signature that is merely unchecked is NOT an error, but it is also not provenance.
  */
-function checkSignature(directory, manifest, key, cwd, errors) {
+function checkSignature(directory, manifest, manifestBytes, key, cwd, errors) {
   const signaturePath = join(directory, SIGNATURE_FILE);
   const declared = manifest.signing || null;
   const present = existsSync(signaturePath);
@@ -143,8 +160,18 @@ function checkSignature(directory, manifest, key, cwd, errors) {
     return "absent";
   }
 
-  const manifestBytes = readFileSync(join(directory, "manifest.json"));
-  const signature = readFileSync(signaturePath, "utf8");
+  let signature;
+  try {
+    const stat = lstatSync(signaturePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      errors.push(`${SIGNATURE_FILE} is not a regular file`);
+      return "invalid";
+    }
+    signature = readFileSync(signaturePath, "utf8");
+  } catch (error) {
+    errors.push(`${SIGNATURE_FILE} could not be read: ${error.message}`);
+    return "invalid";
+  }
 
   if (!key) {
     // Deliberately do NOT validate against the embedded key and call it verified. Doing so would
@@ -220,6 +247,35 @@ function validateManifest(manifest, errors) {
       errors.push("manifest.build.subject is invalid");
     }
   }
+  if (manifest.signing !== null && manifest.signing !== undefined) {
+    const signing = manifest.signing;
+    if (!signing || typeof signing !== "object" || Array.isArray(signing)) {
+      errors.push("manifest.signing must be an object or null");
+    } else {
+      const allowedSigning = new Set(["algorithm", "keyId", "publicKey", "signatureFile"]);
+      for (const field of Object.keys(signing)) {
+        if (!allowedSigning.has(field)) errors.push(`manifest.signing has unknown field: ${field}`);
+      }
+      if (signing.algorithm !== "ed25519") errors.push("manifest.signing.algorithm must be ed25519");
+      if (!/^[a-f0-9]{32}$/.test(signing.keyId || "")) errors.push("manifest.signing.keyId is invalid");
+      if (typeof signing.publicKey !== "string" || signing.publicKey.length === 0) {
+        errors.push("manifest.signing.publicKey must be a non-empty string");
+      } else {
+        const publicKey = embeddedPublicKey(signing);
+        if (!publicKey || publicKey.asymmetricKeyType !== "ed25519") {
+          errors.push("manifest.signing.publicKey must encode an ed25519 public key");
+        } else {
+          const pem = publicKey.export({ type: "spki", format: "pem" });
+          if (keyIdFor(pem) !== signing.keyId) {
+            errors.push("manifest.signing.keyId does not match manifest.signing.publicKey");
+          }
+        }
+      }
+      if (signing.signatureFile !== SIGNATURE_FILE) {
+        errors.push(`manifest.signing.signatureFile must be ${SIGNATURE_FILE}`);
+      }
+    }
+  }
 }
 
 function validateDigestRecord(record, label, errors) {
@@ -283,14 +339,17 @@ function result(directory, manifest, errors, warnings, signatureStatus = "absent
     bundleDir: directory,
     runId: manifest?.runId || null,
     ok: errors.length === 0,
-    // A present-but-unchecked signature never upgrades this verdict: only the checksum walk and an
-    // externally anchored --key can. See the trust-model note in src/sign.mjs.
-    verdict: errors.length === 0 ? "VERIFIED" : "INVALID",
+    // Integrity and externally anchored provenance are different outcomes. Both are successful
+    // checks, but only AUTHENTICATED says who produced the bundle.
+    verdict: errors.length > 0
+      ? "INVALID"
+      : signatureStatus === "verified" ? "AUTHENTICATED" : "INTACT",
+    verificationLevel: errors.length > 0
+      ? "none"
+      : signatureStatus === "verified" ? "provenance" : "integrity",
     signatureStatus,
     errors,
     warnings,
     notice,
   };
 }
-
-

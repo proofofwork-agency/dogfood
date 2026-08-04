@@ -1,6 +1,6 @@
 # Signing
 
-Signing binds a bundle to a key you control. It is optional; unsigned bundles still verify their own checksums.
+Signing binds a bundle to a key you control. It is optional; unsigned bundles can still prove checksum integrity as `INTACT`.
 
 ## The trust model — read this first
 
@@ -14,15 +14,15 @@ dogfood verify <bundle> --key <public key you obtained out of band>
 
 Everything else is weaker, and dogfood says so rather than implying otherwise:
 
-| Command | `signatureStatus` | What it means |
-|---|---|---|
-| `verify <bundle>` on an unsigned bundle | `absent` | Checksums are internally consistent. Nothing about origin. |
-| `verify <bundle>` on a signed bundle | `unverified` | A signature exists and **was not checked**. Not provenance. |
-| `verify <bundle> --key <yours>` | `verified` | The bundle came from the holder of that key. |
-| `verify <bundle> --key <wrong>` | `invalid` | Altered after signing, or signed by someone else. |
-| `verify <unsigned> --key <any>` | `absent` + error | You asked for a signature check on a bundle with no signature. |
+| Command | Verdict | `signatureStatus` | What it means |
+|---|---|---|---|
+| `verify <bundle>` on an unsigned bundle | `INTACT` | `absent` | Checksums are internally consistent. Nothing about origin. |
+| `verify <bundle>` on a signed bundle | `INTACT` | `unverified` | A signature exists and **was not checked**. Not provenance. |
+| `verify <bundle> --key <yours>` | `AUTHENTICATED` | `verified` | The bundle came from the holder of that key. |
+| `verify <bundle> --key <wrong>` | `INVALID` | `invalid` | Altered after signing, or signed by someone else. |
+| `verify <unsigned> --key <any>` | `INVALID` | `absent` | You asked for a signature check on a bundle with no signature. |
 
-Bare `verify` on a signed bundle never upgrades the verdict and never describes the bundle as trusted — not in the CLI output, not in `--json`, not in the exit code. A signing scheme that anchors to itself is worse than no signing, because it invites trust the artifact has not earned.
+Bare `verify` on a signed bundle remains `INTACT` and never describes the bundle as authenticated — not in the CLI output or `--json`. Exit 0 means the requested check succeeded: integrity for bare `verify`, provenance only when `--key` is supplied. A signing scheme that anchors to itself is worse than no signing, because it invites trust the artifact has not earned.
 
 ## Generating a key
 

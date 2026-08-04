@@ -5,7 +5,23 @@ const DOCUMENT_REDACTION = "REDACTED";
 // Redaction is on by default; templates/dogfood.policy.yaml ships this same logs block.
 export const DEFAULT_LOG_POLICY = Object.freeze({
   capture: "full-redacted",
-  redactEnv: ["GITHUB_TOKEN", "*_TOKEN", "*_SECRET", "*_PASSWORD", "*_KEY", "*_CREDENTIAL*"],
+  redactEnv: [
+    "GITHUB_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "*_TOKEN",
+    "*_SECRET",
+    "*_PASSWORD",
+    "*_KEY",
+    "*_KEY_ID",
+    "*_CREDENTIAL*",
+    "*_CONNECTION_STRING",
+    "CONNECTION_STRING",
+    "*_DSN",
+    "DATABASE_URL",
+    "*_URL",
+    "*_AUTH",
+    "*_COOKIE",
+  ],
   redactLiterals: [],
 });
 

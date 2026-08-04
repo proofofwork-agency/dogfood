@@ -388,9 +388,11 @@ function entryKind(entry, path) {
   if (entry.isSymbolicLink()) return "symlink";
   if (!entry.isFile()) return "other";
   // A second hard link makes the bundle's own content editable from outside it.
-  return hardLinkCount(path) > 1 ? "hardlink" : "file";
+  const links = hardLinkCount(path);
+  if (links === null) return "unreadable";
+  return links > 1 ? "hardlink" : "file";
 }
-function hardLinkCount(path) { try { return lstatSync(path).nlink; } catch { return 1; } }
+function hardLinkCount(path) { try { return lstatSync(path).nlink; } catch { return null; } }
 function escapeCell(value) { return String(value ?? "").replaceAll("|", "\\|").replace(/[\r\n]+/g, " "); }
 function escapeInline(value) { return String(value).replaceAll("`", "\\`").replace(/[\r\n]+/g, " "); }
 function xml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }

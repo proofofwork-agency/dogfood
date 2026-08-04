@@ -21,6 +21,7 @@ import {
   authoritativeInitialProblems,
   authoritativeRepositoryProblems,
   captureRepositoryState,
+  resetUntrackedDigestCache,
   repositoryStateChanged,
   summarizeRepository,
 } from "./repository.mjs";
@@ -42,6 +43,7 @@ export class RunSetupError extends Error {
 
 export async function runDogfood(options = {}) {
   const cwd = resolve(options.cwd || process.cwd());
+  resetUntrackedDigestCache();
   const startedAt = new Date().toISOString();
   const runId = options.runId || `dogfood-${startedAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) throw new RunSetupError(`Invalid run id: ${runId}`);
@@ -346,7 +348,7 @@ export async function initProject(cwd, { force = false, authoritative = false } 
     "# Dogfood project gate",
     "",
     "This directory contains a portable Dogfood v2 proof contract.",
-    authoritative ? "The explicit policy enables the authoritative v0.3 profile." : "No policy is installed, so standard compatibility mode is active.",
+    authoritative ? "The explicit policy enables the authoritative profile." : "No policy is installed, so standard compatibility mode is active.",
     "",
     "1. Replace the placeholder command.",
     "2. Declare an oracle for every in-scope acceptance criterion.",

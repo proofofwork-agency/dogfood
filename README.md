@@ -31,7 +31,7 @@ A gate is defined by what it will not let through.
 | A criterion with **no oracle** fails | Never a silent skip. If you did not say how it would be proven, it is not proven. |
 | A test that passed **on retry** fails | The first attempt must pass. Retries launder flakes into evidence. |
 | A **weakened contract** fails | Against a base commit, removing a criterion, downgrading its class, or trading a tagged test for an exit code is refused before anything runs. |
-| A command that **edits tracked files** during its own proof fails | Git state is captured before and after every command. Edit-until-green does not survive it. |
+| A command whose **net tracked Git state changes** during its proof fails | Git state is captured before and after every command. An edit reverted byte-for-byte before the final snapshot is outside this guarantee. |
 | The **generated contract** fails | `dogfood init` scaffolds something that cannot pass until you map a real oracle. A scaffold that passes immediately proves nothing. |
 
 ## What PASS does not mean

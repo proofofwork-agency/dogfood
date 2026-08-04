@@ -9,6 +9,14 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
 
 ### Added
 
+- **`verify` reports a verification level, not a boolean.** A bundle whose checksums hold is
+  `INTACT`; one whose detached signature verifies against an externally supplied key is
+  `AUTHENTICATED`. `verificationLevel` is `integrity` or `provenance` accordingly. The two facts
+  deserve two words: "the bundle is self-consistent" and "we know who produced it" are not the same
+  claim, and collapsing them into one verdict is how a reader ends up trusting the wrong thing.
+- **Signing metadata is validated, not just the signature.** `manifest.signing.signatureFile` must
+  be exactly `manifest.sig`, and `publicKey` must actually encode an ed25519 key. Verifying a
+  signature while trusting the block that describes it left a gap.
 - **Detached ed25519 manifest signatures.** `dogfood keygen`, `dogfood run --sign <key>`, and
   `dogfood verify <bundle> --key <key>`. The signature lives in `manifest.sig` and covers the exact
   on-disk bytes of `manifest.json`. Implemented with `node:crypto`; no new dependency.
@@ -24,6 +32,11 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
 
 - **Manifest and report go to version 4.** Signing needs a field the closed v3 manifest schema had
   no room for, and the package was still unpublished, so the format break was free exactly once.
+- Default redaction patterns now cover credential-bearing URLs (`DATABASE_URL`, `REDIS_URL`,
+  `MONGODB_URI`, `AMQP_URL`, `*_DSN`, `*_CONNECTION_STRING`, `*_URI`), cookies, and auth headers.
+  They deliberately do **not** include a blanket `*_URL`: `BASE_URL` and `CI_PROJECT_URL` are
+  diagnostics, and scrubbing them makes a FAIL bundle harder to read, which is the one job that
+  bundle has.
 - Log redaction is on by default instead of only under `--policy`, and reaches metadata command
   strings, adapter details, report bodies, and evaluation JSON rather than stdout and stderr alone.
 - `validate` writes `latest-validate.json` instead of overwriting `latest.json`, so `report` shows
@@ -54,16 +67,17 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
 
 ### Breaking
 
+- `verify`'s JSON verdict is now `INTACT` / `AUTHENTICATED` / `INVALID` rather than
+  `VERIFIED` / `INVALID`. Anything parsing that field must be updated.
 - A Playwright command that prints JSON to stdout without writing the configured report now fails.
 - Bundles containing non-regular entries no longer verify.
 - Leading-dash baseline refs are rejected as CLI usage errors.
-- **v2 and v3 bundles no longer verify** and report rerun guidance. They predate the signed format.
+- Pre-release manifest formats are not accepted; the first public format is version 1.
 - Standard-mode logs now contain `[REDACTED]` where they previously carried raw values.
 
 ### Versions
 
-Package 0.4.0 · contract **v2, unchanged** · policy **v1, unchanged** (`logs.capture: "full"` and
-`signing.required` are additive) · report and manifest **3 → 4**.
+Package 0.4.0 · contract **v1** · policy **v1** · report and manifest **v1**.
 
 ### Deferred to 0.5.0
 

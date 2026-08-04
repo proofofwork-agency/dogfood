@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -82,6 +82,45 @@ test("timeouts terminate a command's complete process tree", { timeout: 15000 },
     assert.equal(result.timedOut, true);
     await new Promise((resolve) => setTimeout(resolve, 1200));
     assert.equal(existsSync(join(cwd, "late.txt")), false);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("timeout settlement is bounded when a detached grandchild retains the stdio pipes", { skip: process.platform === "win32", timeout: 10000 }, async () => {
+  const cwd = createProject(validContract(), {
+    "detached-parent.mjs": [
+      "import { spawn } from 'node:child_process';",
+      "spawn(process.execPath, ['-e', 'setTimeout(() => {}, 4000)'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"),
+  });
+  try {
+    const result = await runCommand("detached", "node detached-parent.mjs", { cwd, timeoutMs: 50 });
+    assert.equal(result.status, "infra");
+    assert.equal(result.timedOut, true);
+    assert.ok(result.durationMs < 3500, `timeout settled after ${result.durationMs}ms`);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("authoritative snapshots hash large untracked files and detect same-size rewrites with restored mtime", { timeout: 15000 }, async () => {
+  const cwd = createProject();
+  const path = join(cwd, "large-untracked.bin");
+  try {
+    writeFileSync(path, Buffer.alloc(8 * 1024 * 1024 + 1, 0x61));
+    const beforeStat = statSync(path);
+    const before = await captureRepositoryState(cwd, { authoritative: true });
+    writeFileSync(path, Buffer.alloc(8 * 1024 * 1024 + 1, 0x62));
+    utimesSync(path, beforeStat.atime, beforeStat.mtime);
+    const after = await captureRepositoryState(cwd, { authoritative: true });
+    const problems = authoritativeRepositoryProblems(before, after);
+    assert.ok(
+      problems.some((problem) => problem.code === "untracked-content-changed"),
+      JSON.stringify({ before: before.untracked, after: after.untracked, problems }),
+    );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

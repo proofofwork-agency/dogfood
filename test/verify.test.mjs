@@ -7,15 +7,30 @@ import { verifyBundle } from "../src/verify.mjs";
 import { stringify as stringifyYaml } from "yaml";
 import { authoritativePolicy, createProject, git, validContract } from "./helpers.mjs";
 
-test("verifies a complete v3 bundle and requires its declared subject", async () => {
+test("verifies a complete v1 bundle and requires its declared subject", async () => {
   const contract = validContract({ build: { requireIdentity: true, subject: { path: "dist/app.bin", algorithm: "sha256" } } });
   const cwd = createProject(contract, { "dist/app.bin": "build-subject\n" });
   const { artifactDir } = await runDogfood({ cwd });
   assert.equal(verifyBundle(artifactDir).ok, false);
   const verified = verifyBundle(artifactDir, { subject: "dist/app.bin", cwd });
   assert.equal(verified.ok, true, verified.errors.join("\n"));
+  assert.equal(verified.verdict, "INTACT");
+  assert.equal(verified.verificationLevel, "integrity");
   writeFileSync(join(cwd, "dist", "wrong.bin"), "wrong\n");
   assert.equal(verifyBundle(artifactDir, { subject: "dist/wrong.bin", cwd }).ok, false);
+});
+
+test("rejects a manifest symlink before reading it", { skip: process.platform === "win32" }, async () => {
+  const cwd = createProject();
+  const { artifactDir } = await runDogfood({ cwd });
+  const manifest = join(artifactDir, "manifest.json");
+  const outside = join(cwd, "outside-manifest.json");
+  writeFileSync(outside, readFileSync(manifest));
+  rmSync(manifest);
+  symlinkSync(outside, manifest);
+  const result = verifyBundle(artifactDir);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("manifest.json is not a regular file"), result.errors.join("\n"));
 });
 
 test("detects altered, missing, and unrecorded bundle files", async () => {

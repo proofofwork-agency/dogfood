@@ -30,7 +30,7 @@ Three things, all stable.
 
 | Code | Meaning |
 |---|---|
-| `0` | `PASS` or `VALID`, or a verified bundle |
+| `0` | `PASS` or `VALID`, or an `INTACT`/`AUTHENTICATED` bundle |
 | `1` | `FAIL`, `INVALID`, bad input, or an invalid bundle |
 | `2` | `INFRA_ERROR` — the environment broke, not the product |
 | `3` | Invalid CLI usage |
@@ -52,7 +52,7 @@ The skill template encodes these, and they are identical for every harness.
 4. On `PASS`, verify the referenced bundle.
 5. Report the acceptance matrix, failed commands, verdict, and bundle path.
 
-A missing oracle is a failure, never a skip. **Do not repair product code or tests during a proof run** — that is the behavior the gate exists to catch, and mutation detection fails the run regardless. On `FAIL`, leave the bundle intact and re-implement in a separate workflow, or ask the product owner to re-refine a criterion that was wrong. On `INFRA_ERROR`, recover the environment and start a fresh complete run. Judgmental criteria and advisory receipts never override deterministic evidence.
+A missing oracle is a failure, never a skip. **Do not repair product code or tests during a proof run.** Mutation detection compares snapshots and fails on net Git-visible changes; it cannot observe an edit reverted byte-for-byte before the after-snapshot or changes to ignored files. On `FAIL`, leave the bundle intact and re-implement in a separate workflow, or ask the product owner to re-refine a criterion that was wrong. On `INFRA_ERROR`, recover the environment and start a fresh complete run. Judgmental criteria and advisory receipts never override deterministic evidence.
 
 The normative source is [the shipped skill template](https://github.com/proofofwork-agency/dogfood/blob/main/templates/skill/SKILL.md). Start a new agent session if a newly installed skill is not discovered immediately.
 

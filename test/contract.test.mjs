@@ -8,6 +8,18 @@ test("validates a complete contract", () => {
   assert.equal(result.ok, true, result.errors.join("\n"));
 });
 
+test("reserves the internal build identity command name", () => {
+  const contract = validContract();
+  contract.commands["_build-identity"] = {
+    run: "node -e \"process.exit(0)\"",
+    timeoutMs: 1000,
+    adapter: "exit-code",
+  };
+  const result = validateContract(contract);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("_build-identity is reserved")));
+});
+
 test("allows an explicitly excluded-only contract without dummy commands", () => {
   const result = validateContract({
     version: 1,
@@ -130,4 +142,3 @@ test("refuses ambiguous v1 command#testId references", () => {
 
 test("refuses a v1 command used as both generic and structured browser evidence", () => {
 });
-

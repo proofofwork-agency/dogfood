@@ -41,6 +41,20 @@ test("CLI uses exit code 3 for invalid usage", () => {
   assert.match(result.stderr, /timeout-ms/);
 });
 
+test("CLI help exposes every command and security-sensitive signing option", () => {
+  const result = spawnSync(process.execPath, [bin, "help"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  for (const command of ["init", "validate", "run", "verify", "keygen", "report", "version", "help"]) {
+    assert.match(result.stdout, new RegExp(`\\bdogfood ${command}\\b`), command);
+  }
+  for (const option of ["--sign", "--key", "--out", "--force"]) {
+    assert.ok(result.stdout.includes(option), option);
+  }
+});
+
 test("version reports the packaged version", () => {
   const result = spawnSync(process.execPath, [bin, "version"], {
     cwd: root,
@@ -90,7 +104,36 @@ test("report refuses a validate-only pointer and carries the verdict in its exit
   assert.match(disguised.stderr, /validate-only bundle/);
 
   writeFileSync(latestPath, JSON.stringify({ ...latest, verdict: "FAIL" }));
-  assert.equal(report().status, 1);
+  const pointerMismatch = report();
+  assert.equal(pointerMismatch.status, 1);
+  assert.match(pointerMismatch.stderr, /metadata disagrees/);
+
+  writeFileSync(latestPath, JSON.stringify(latest));
+  writeFileSync(join(cwd, "artifacts", "dogfood", latest.path, "summary.md"), "tampered\n");
+  const tampered = report();
+  assert.equal(tampered.status, 1);
+  assert.match(tampered.stderr, /integrity verification/);
+});
+
+test("report resolves the pointer target through real paths", { skip: process.platform === "win32" }, async () => {
+  const cwd = createProject(validContract());
+  await runDogfood({ cwd });
+  const outside = mkdtempSync(join(tmpdir(), "dogfood-report-outside-"));
+  try {
+    const root = join(cwd, "artifacts", "dogfood");
+    symlinkSync(outside, join(root, "escape"));
+    writeFileSync(join(root, "latest.json"), JSON.stringify({
+      path: "escape",
+      runId: "escape",
+      mode: "run",
+      verdict: "PASS",
+    }));
+    const result = spawnSync(process.execPath, [bin, "report", "--cwd", cwd], { encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /escapes artifacts\/dogfood/);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test("report warns when the proven commit is no longer the workspace commit", async () => {

@@ -21,5 +21,4 @@ Pull-request and merge-group events pass their protected base commit through `--
 
 ## Evidence retention
 
-The workflow uploads `artifacts/dogfood/` even when the proof step fails. Treat uploaded command logs as potentially sensitive despite default redaction. Set repository-specific retention and access controls in the host workflow.
-
+The composite action uploads only the current bundle, even when the proof step fails. Treat uploaded command logs and command-created side files as potentially sensitive despite default redaction. Set repository-specific retention and access controls in the host workflow.

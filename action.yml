@@ -22,6 +22,9 @@ inputs:
   sign-key:
     description: Path to an ed25519 private key. Write it from a secret; never commit it.
     required: false
+  verify-key:
+    description: Independently trusted ed25519 public key used to authenticate the generated bundle.
+    required: false
   timeout-ms:
     description: Ceiling applied to every command, in milliseconds.
     required: false
@@ -114,10 +117,12 @@ runs:
       env:
         BUNDLE: ${{ steps.dogfood.outputs.bundle-path }}
         SUBJECT: ${{ inputs.subject }}
+        VERIFY_KEY: ${{ inputs.verify-key }}
       run: |
         set -euo pipefail
         args=()
         [ -n "$SUBJECT" ] && args+=(--subject "$SUBJECT")
+        [ -n "$VERIFY_KEY" ] && args+=(--key "$VERIFY_KEY")
         npx --no-install dogfood verify "$BUNDLE" "${args[@]}"
 
     - name: Publish summary
@@ -136,6 +141,6 @@ runs:
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: dogfood-evidence
-        path: ${{ inputs.working-directory }}/artifacts/dogfood/
+        path: ${{ inputs.working-directory }}/${{ steps.dogfood.outputs.bundle-path }}
         retention-days: ${{ inputs.artifact-retention-days }}
         if-no-files-found: error

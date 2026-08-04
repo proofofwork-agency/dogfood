@@ -2,12 +2,26 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import test from "node:test";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ContractInputError } from "../src/load-contract.mjs";
 import { listFiles } from "../src/report.mjs";
-import { runDogfood } from "../src/run.mjs";
+import { createRedactor, DEFAULT_LOG_POLICY } from "../src/redact.mjs";
+import { PACKAGE_ROOT, runDogfood } from "../src/run.mjs";
 import { verifyBundle } from "../src/verify.mjs";
 import { authoritativePolicy, createProject, git, validContract } from "./helpers.mjs";
+
+test("default redaction covers common cloud, connection, URL, auth, and cookie names", () => {
+  const values = {
+    AWS_ACCESS_KEY_ID: "AKIAEXAMPLE123456789",
+    DATABASE_URL: "postgres://user:password@example.invalid/db",
+    REDIS_DSN: "redis://:password@example.invalid/0",
+    SERVICE_CONNECTION_STRING: "Server=example.invalid;Password=secret-value",
+    SERVICE_AUTH: "bearer-secret-value",
+    SESSION_COOKIE: "cookie-secret-value",
+  };
+  const redacted = createRedactor(DEFAULT_LOG_POLICY, values).apply(Object.values(values).join("\n"));
+  for (const secret of Object.values(values)) assert.equal(redacted.includes(secret), false, secret);
+});
 
 test("authoritative policy fails closed on unknown fields and missing files", async () => {
   const cwd = createProject();
@@ -151,4 +165,29 @@ test("redaction leaves short numeric secrets alone instead of shredding the log"
     if (previous === undefined) delete process.env.DOGFOOD_TEST_KEY;
     else process.env.DOGFOOD_TEST_KEY = previous;
   }
+});
+
+test("shipped redaction patterns catch credential URLs without scrubbing diagnostics", () => {
+  const policy = parseYaml(readFileSync(join(PACKAGE_ROOT, "templates", "dogfood.policy.yaml"), "utf8"));
+  const env = {
+    BASE_URL: "http://localhost:4173",
+    CI_PROJECT_URL: "https://github.com/owner/repo",
+    DATABASE_URL: "postgres://user:pw@host/db",
+    REDIS_URL: "redis://:secret@host:6379",
+    MONGODB_URI: "mongodb://user:pw@host/x",
+    GITHUB_TOKEN: "ghp_averylongtokenvalue",
+    DEBUG_ENABLED: "true",
+  };
+  const redactor = createRedactor(policy.logs, env);
+  const output = redactor.apply(Object.values(env).join("\n"));
+
+  // Credentials must not survive.
+  for (const secret of [env.DATABASE_URL, env.REDIS_URL, env.MONGODB_URI, env.GITHUB_TOKEN]) {
+    assert.ok(!output.includes(secret), `secret survived redaction: ${secret}`);
+  }
+  // A FAIL bundle is what operators read to find out what broke, so a non-secret URL that is
+  // scrubbed is a false red in the debugging surface. An over-broad "*_URL" caused exactly that.
+  assert.ok(output.includes(env.BASE_URL), "BASE_URL is a diagnostic, not a secret");
+  assert.ok(output.includes(env.CI_PROJECT_URL), "CI_PROJECT_URL is a diagnostic, not a secret");
+  assert.ok(output.includes("true"), "short and boolean values must not be redacted");
 });

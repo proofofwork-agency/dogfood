@@ -38,6 +38,8 @@ Missing, skipped, interrupted, failed, expected-failure, retried, and flaky exec
 
 The command's own stdout is never accepted as evidence, even when it parses as a plausible Playwright report. Only the report file written during that command is accepted and republished through the configured redactor.
 
+The report file is limited to 50 MiB and is refused before parsing when larger, so a malformed or runaway reporter cannot make the gate read an unbounded document into memory.
+
 Run the fixture from the repository root:
 
 ```bash
@@ -45,4 +47,3 @@ npm run test:playwright-fixture
 ```
 
 It proves a clean PASS, rejects a planted product failure, restores the fixture, and proves a final PASS.
-

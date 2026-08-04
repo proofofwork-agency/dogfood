@@ -51,10 +51,7 @@ test("complete authoritative policy examples in the documentation validate", (t)
 
 test("docs/cli.md names every command and option supported by the CLI", (t) => {
   const target = join(docsDir, "cli.md");
-  if (!existsSync(target)) {
-    t.diagnostic("docs/cli.md not present yet; CLI coverage check deferred until the reference exists");
-    return;
-  }
+  assert.ok(existsSync(target), "docs/cli.md is a shipped reference and must not be missing");
 
   const source = readFileSync(join(root, "bin", "dogfood.mjs"), "utf8");
   const commandsMatch = source.match(/const COMMANDS = new Set\((\[[\s\S]*?\])\);/);
@@ -81,10 +78,10 @@ for (const [schemaName, documentationName, schema] of [
 ]) {
   test(`docs/${documentationName} names every ${schemaName} schema field`, (t) => {
     const target = join(docsDir, documentationName);
-    if (!existsSync(target)) {
-      t.diagnostic(`docs/${documentationName} not present yet; schema coverage check deferred until the reference exists`);
-      return;
-    }
+    assert.ok(
+      existsSync(target),
+      `docs/${documentationName} is a shipped ${schemaName} reference and must not be missing`,
+    );
 
     const documentation = readFileSync(target, "utf8");
     const fields = [...schemaPropertyNames(schema)].sort();

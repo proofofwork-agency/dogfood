@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWriteFile, atomicWriteJson, safeSegment } from "./files.mjs";
 import { createDocumentRedactor, createRedactor, DEFAULT_LOG_POLICY, redactDeep } from "./redact.mjs";
@@ -7,6 +7,7 @@ export const ADAPTER_VERSIONS = Object.freeze({
   "exit-code": "1",
   "playwright-json": "1",
 });
+export const MAX_PLAYWRIGHT_REPORT_BYTES = 50 * 1024 * 1024;
 
 export function prepareAdapter(name, definition, artifactDir) {
   const safeName = safeSegment(name);
@@ -126,6 +127,27 @@ export function evaluatePlaywrightJson(
 
   let report;
   if (reportPath && existsSync(reportPath)) {
+    let reportSize;
+    try {
+      const stat = statSync(reportPath);
+      if (!stat.isFile()) throw new Error("report path is not a regular file");
+      reportSize = stat.size;
+    } catch (error) {
+      return {
+        ...base,
+        accepted: false,
+        status: "fail",
+        detail: `Playwright JSON report is unreadable: ${error.message}.`,
+      };
+    }
+    if (reportSize > MAX_PLAYWRIGHT_REPORT_BYTES) {
+      return {
+        ...base,
+        accepted: false,
+        status: "fail",
+        detail: `Playwright JSON report exceeds the ${MAX_PLAYWRIGHT_REPORT_BYTES / 1024 / 1024} MiB evidence limit.`,
+      };
+    }
     // Only the parse belongs in the try; a failed republish is not an invalid report.
     try {
       report = parsePlaywrightReport(readFileSync(reportPath, "utf8"));
@@ -312,4 +334,3 @@ function describeParseFailure(error) {
 function capDetail(value) {
   return value.length > 120 ? `${value.slice(0, 117)}...` : value;
 }
-

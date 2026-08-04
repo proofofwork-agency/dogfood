@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { createReadStream, lstatSync, readlinkSync } from "node:fs";
+import { lstatSync, readlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { normalizeGitPath, portableRelative, tryRealpath } from "./files.mjs";
 import { sha256, sha256File } from "./hash.mjs";
@@ -10,10 +10,6 @@ const EMPTY_TREE_OID = Object.freeze({
   sha1: "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
   sha256: "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
 });
-// Above this size a file's existence and length carry the change signal; a full re-read per
-// command would dominate the run without proving anything the size does not already show.
-const MAX_UNTRACKED_DIGEST_BYTES = 8 * 1024 * 1024;
-
 export async function captureRepositoryState(cwd, { authoritative = false } = {}) {
   const rootResult = gitSmall(cwd, ["rev-parse", "--show-toplevel"]);
   if (rootResult.status !== 0) {
@@ -265,8 +261,8 @@ function emptyTreeOid(root) {
     : EMPTY_TREE_OID.sha1;
 }
 
-// Path, size and nanosecond mtime for the lifetime of the process. Every command snapshots the
-// working tree twice, so without this the same unchanged file is re-read on every single pass.
+// Stable file identity and metadata for the lifetime of one run. ctime cannot be restored with
+// ordinary utimes calls, so a same-size rewrite with a restored mtime cannot reuse an old digest.
 const untrackedDigests = new Map();
 const MAX_UNTRACKED_DIGEST_ENTRIES = 50_000;
 
@@ -277,14 +273,11 @@ export function resetUntrackedDigestCache() {
 
 async function untrackedFileEntry(path, stat) {
   const size = Number(stat.size);
-  if (size > MAX_UNTRACKED_DIGEST_BYTES) {
-    return { type: "file", size, digest: null, digestSkipped: true };
-  }
-  // A rewrite that keeps the byte count and the exact nanosecond timestamp is the only content
-  // change this key cannot see; git status still reports the file, and tracked files never use it.
-  const key = `${path}\0${size}\0${stat.mtimeNs}`;
+  const key = `${path}\0${stat.dev}\0${stat.ino}\0${size}\0${stat.mtimeNs}\0${stat.ctimeNs}`;
   const memoized = untrackedDigests.get(key);
   if (memoized) return { type: "file", size, digest: memoized };
+  // Hash every file, regardless of size. sha256File streams, so this closes the old >8 MiB
+  // same-size blind spot without retaining the file in memory.
   const digest = await sha256File(path);
   if (untrackedDigests.size >= MAX_UNTRACKED_DIGEST_ENTRIES) untrackedDigests.clear();
   untrackedDigests.set(key, digest);
@@ -317,5 +310,4 @@ function unavailable(error, root = null) {
 function cleanError(value) {
   return String(value || "").trim().split("\n").filter(Boolean).pop() || "";
 }
-
 

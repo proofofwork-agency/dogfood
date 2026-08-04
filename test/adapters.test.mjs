@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { evaluateAdapter, evaluatePlaywrightJson, evaluatePlaywrightTag, prepareAdapter } from "../src/adapters.mjs";
+import { evaluateAdapter, evaluatePlaywrightJson, evaluatePlaywrightTag, MAX_PLAYWRIGHT_REPORT_BYTES, prepareAdapter } from "../src/adapters.mjs";
 import { createRedactor } from "../src/redact.mjs";
 import {
   playwrightExecution,
@@ -23,6 +23,21 @@ test("accepts every matching first-attempt execution across projects", () => {
   const result = evaluatePlaywrightTag(report, "@dogfood:AC-proof");
   assert.equal(result.status, "pass");
   assert.equal(result.executions.length, 2);
+});
+
+test("finds an exact tag in nested Playwright suites", () => {
+  const report = {
+    suites: [{
+      title: "outer",
+      suites: [{
+        title: "inner",
+        specs: [playwrightSpec({ title: "nested proof" })],
+      }],
+    }],
+  };
+  const result = evaluatePlaywrightTag(report, "@dogfood:AC-proof");
+  assert.equal(result.status, "pass", result.detail);
+  assert.equal(result.executions.length, 1);
 });
 
 test("requires an exact structured tag", () => {
@@ -110,6 +125,25 @@ test("refuses a Playwright report forged on stdout and copies no part of it into
     assert.equal(result.detail.includes(secret), false);
     // Stdout reaches the bundle only through the log policy, never as a second uncontrolled copy.
     assert.deepEqual(readdirSync(directory), []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses an oversized Playwright report before reading it into memory", () => {
+  const directory = mkdtempSync(join(tmpdir(), "dogfood-adapter-large-"));
+  try {
+    const reportPath = join(directory, "report.json");
+    writeFileSync(reportPath, "");
+    truncateSync(reportPath, MAX_PLAYWRIGHT_REPORT_BYTES + 1);
+    const result = evaluatePlaywrightJson(
+      { status: "pass", code: 0, timedOut: false, stdout: "" },
+      reportPath,
+      ["@dogfood:AC-proof"],
+    );
+    assert.equal(result.status, "fail");
+    assert.equal(result.accepted, false);
+    assert.match(result.detail, /evidence limit/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

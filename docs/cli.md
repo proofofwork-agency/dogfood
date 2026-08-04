@@ -11,7 +11,7 @@ The package exposes the same executable as `dogfood` and `pow-dogfood`. Examples
 | `init` | Writes the starter contract, CI and CODEOWNERS fragments, and Claude/Codex skills. `--authoritative` also writes a policy. Existing files are preserved unless `--force` is supplied. |
 | `validate` | Validates the contract, explicit policy, baseline, and oracle mappings. It writes a validate bundle but runs no proof commands. |
 | `run` | Executes a fresh proof and writes the run bundle plus `latest.json`. |
-| `verify` | Verifies one existing bundle. It does not execute the contract. |
+| `verify` | Verifies one existing bundle. It reports `INTACT` for checksum-only integrity and `AUTHENTICATED` only when `--key` verifies an external trust anchor. It does not execute the contract. |
 | `report` | Prints the `summary.md` selected by `latest.json` and returns the recorded verdict's exit code. |
 | `keygen` | Writes an ed25519 signing pair into `--out`. The private key is created mode `0600`. Existing keys are preserved unless `--force` is supplied. |
 
@@ -25,7 +25,7 @@ The package exposes the same executable as `dogfood` and `pow-dogfood`. Examples
 | `--baseline-ref` | yes | `validate`, `run` | Compares the contract with the resolved Git commit. Requires a valid `--policy`; values beginning with `-` are rejected. |
 | `--subject` | yes | `verify` | Requires the supplied file to match the subject recorded in the manifest. |
 | `--json` | no | `validate`, `run`, `verify` | Prints the machine-readable result. |
-| `--force` | no | `init` | Allows generated files to overwrite existing destinations. |
+| `--force` | no | `init`, `keygen` | Allows generated files or signing keys to overwrite existing destinations. |
 | `--authoritative` | no | `init` | Installs `.dogfood/dogfood.policy.yaml` in addition to the standard files. |
 | `--timeout-ms` | yes | `run` | Applies a 1–3,600,000 ms ceiling to every command. The effective timeout is `Math.min` of this value and the command's declared `timeoutMs`, so raising it above a command's own limit does nothing. |
 | `--evidence` | yes | `run` | Adds one advisory receipt. The flag is repeatable. |
@@ -60,8 +60,8 @@ Standard output and error are captured independently. Each stream keeps at most 
 
 | Code | Meaning |
 |---:|---|
-| 0 | `VALID`, `PASS`, or a verified bundle. |
-| 1 | `INVALID`, `FAIL`, bundle verification failure, contract input failure, migration failure, or `report` with no usable run pointer. |
+| 0 | `VALID`, `PASS`, an integrity-only `INTACT` bundle, or an externally anchored `AUTHENTICATED` bundle. Use `verify --key` when provenance is required. |
+| 1 | `INVALID`, `FAIL`, bundle verification failure, contract input failure, or `report` with no usable run pointer. |
 | 2 | `INFRA_ERROR`, including a bundle writer integrity refusal. |
 | 3 | Invalid CLI usage. |
 | 4 | Unexpected internal runner error. |
@@ -73,4 +73,3 @@ dogfood validate --json
 dogfood run --policy .dogfood/dogfood.policy.yaml --json
 dogfood verify artifacts/dogfood/<run-id> --json
 ```
-

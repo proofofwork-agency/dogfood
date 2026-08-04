@@ -253,18 +253,49 @@ function printLatestReport(cwd) {
     return 1;
   }
   const runDirectory = resolve(artifactRoot, latest.path);
-  if (!inside(artifactRoot, runDirectory)) {
+  const artifactRootReal = realPathOrNull(artifactRoot);
+  const runDirectoryReal = realPathOrNull(runDirectory);
+  if (!artifactRootReal || !runDirectoryReal) {
+    console.error("latest.json run path is missing or unreadable.");
+    return 1;
+  }
+  if (!inside(artifactRootReal, runDirectoryReal)) {
     console.error("latest.json run path escapes artifacts/dogfood.");
     return 1;
   }
-  const summary = join(runDirectory, "summary.md");
+  const verification = verifyBundle(runDirectoryReal, { cwd, requireSubject: false });
+  if (!verification.ok) {
+    console.error("Latest bundle failed integrity verification:");
+    for (const error of verification.errors) console.error(`  - ${error}`);
+    return 1;
+  }
+  let report;
+  try {
+    report = JSON.parse(readFileSync(join(runDirectoryReal, "summary.json"), "utf8"));
+  } catch (error) {
+    console.error(`Latest summary metadata is unreadable: ${error.message}`);
+    return 1;
+  }
+  if (report.mode !== "run") {
+    console.error(`latest.json points at a ${report.mode || "non-run"} bundle; no proof was executed.`);
+    return 1;
+  }
+  if ((latest.runId && latest.runId !== report.runId) ||
+      (latest.verdict && latest.verdict !== report.verdict)) {
+    console.error("latest.json metadata disagrees with the verified bundle.");
+    return 1;
+  }
+  const summary = join(runDirectoryReal, "summary.md");
   if (!existsSync(summary)) {
     console.error(`Latest summary is missing: ${summary}`);
     return 1;
   }
   console.log(readFileSync(summary, "utf8"));
-  for (const warning of provenanceWarnings(cwd, runDirectory, latest)) console.error(`! ${warning}`);
-  return exitCodeForVerdict(latest.verdict);
+  console.error(`! Bundle: ${verification.verdict}; signature=${verification.signatureStatus}. ${verification.notice}`);
+  for (const warning of [...verification.warnings, ...provenanceWarnings(cwd, runDirectoryReal, report)]) {
+    console.error(`! ${warning}`);
+  }
+  return exitCodeForVerdict(report.verdict);
 }
 
 /** The pointer survives a refused or crashed run, so a stale proof has to announce itself. */
@@ -329,6 +360,8 @@ function printResult(report, artifactDir, contractPath) {
 function printVerification(verification) {
   console.log(`Dogfood bundle ${verification.verdict}${verification.runId ? ` — ${verification.runId}` : ""}`);
   console.log(`Bundle: ${verification.bundleDir}`);
+  console.log(`Verification level: ${verification.verificationLevel}`);
+  console.log(`Signature: ${verification.signatureStatus}`);
   for (const error of verification.errors) console.log(`  ✗ ${error}`);
   for (const warning of verification.warnings) console.log(`  ! ${warning}`);
   console.log(`\n${verification.notice}`);
@@ -352,7 +385,7 @@ Usage:
   dogfood help
 
 Exit codes:
-  0  VALID, PASS, or verified bundle
+  0  VALID, PASS, or an INTACT/AUTHENTICATED bundle
   1  INVALID/FAIL (including tampering or incomplete verification)
   2  INFRA_ERROR
   3  Invalid CLI usage

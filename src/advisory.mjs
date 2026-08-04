@@ -3,6 +3,10 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { atomicWriteFile, atomicWriteJson, isPathInside, safeSegment } from "./files.mjs";
 import { validateAdvisoryReceipt } from "./validate.mjs";
 
+const MAX_RECEIPT_BYTES = 1024 * 1024;
+const MAX_ADVISORY_ARTIFACT_BYTES = 25 * 1024 * 1024;
+const MAX_ADVISORY_TOTAL_BYTES = 100 * 1024 * 1024;
+
 /**
  * Copies advisory receipts into the bundle.
  *
@@ -19,6 +23,7 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
   const knownCriteria = new Set(criteria.map((criterion) => criterion.id));
   const destination = join(artifactDir, "evidence", "advisory");
   mkdirSync(destination, { recursive: true });
+  let copiedBytes = 0;
 
   for (const [index, input] of paths.entries()) {
     const label = `evidence[${index}]`;
@@ -32,6 +37,11 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
 
     let receipt;
     try {
+      const stat = statSync(receiptPath);
+      if (!stat.isFile()) throw new Error("receipt is not a regular file");
+      if (stat.size > MAX_RECEIPT_BYTES) {
+        throw new Error(`receipt exceeds the ${MAX_RECEIPT_BYTES / 1024 / 1024} MiB limit`);
+      }
       receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
     } catch (error) {
       errors.push(`${label}: could not read JSON receipt: ${error.message}`);
@@ -54,9 +64,17 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
       let source;
       try {
         source = safeWorkspacePath(artifact, workspace, cwd);
-        if (!existsSync(source) || !statSync(source).isFile()) {
+        const stat = statSync(source);
+        if (!existsSync(source) || !stat.isFile()) {
           throw new Error(`artifact is not a file: ${artifact}`);
         }
+        if (stat.size > MAX_ADVISORY_ARTIFACT_BYTES) {
+          throw new Error(`artifact exceeds the ${MAX_ADVISORY_ARTIFACT_BYTES / 1024 / 1024} MiB per-file limit: ${artifact}`);
+        }
+        if (copiedBytes + stat.size > MAX_ADVISORY_TOTAL_BYTES) {
+          throw new Error(`advisory artifacts exceed the ${MAX_ADVISORY_TOTAL_BYTES / 1024 / 1024} MiB total limit`);
+        }
+        copiedBytes += stat.size;
       } catch (error) {
         errors.push(`${label}.artifacts[${artifactIndex}]: ${error.message}`);
         artifactError = true;

@@ -94,6 +94,8 @@ test("an unsigned bundle verifies, and --key against it is an error", async () =
   const bare = verifyBundle(artifactDir, { cwd });
   assert.equal(bare.ok, true);
   assert.equal(bare.signatureStatus, "absent");
+  assert.equal(bare.verdict, "INTACT");
+  assert.equal(bare.verificationLevel, "integrity");
 
   const withKey = verifyBundle(artifactDir, { cwd, key: publicPath });
   assert.equal(withKey.ok, false);
@@ -110,11 +112,34 @@ test("a signed bundle is unverified without --key and verified with the right on
   const bare = verifyBundle(artifactDir, { cwd });
   assert.equal(bare.ok, true);
   assert.equal(bare.signatureStatus, "unverified");
+  assert.equal(bare.verdict, "INTACT");
   assert.match(bare.notice, /not a trust anchor/);
 
   const anchored = verifyBundle(artifactDir, { cwd, key: publicPath });
   assert.equal(anchored.ok, true);
   assert.equal(anchored.signatureStatus, "verified");
+  assert.equal(anchored.verdict, "AUTHENTICATED");
+  assert.equal(anchored.verificationLevel, "provenance");
+});
+
+test("invalid signing metadata fails before a signature can be trusted", async () => {
+  const cwd = createProject();
+  const { privatePath, publicPath } = writeKeyPair(keyDir(cwd));
+  const { artifactDir } = await runDogfood({ cwd, sign: privatePath });
+  const manifestPath = join(artifactDir, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.signing.signatureFile = "other.sig";
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const result = verifyBundle(artifactDir, { cwd, key: publicPath });
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("signatureFile must be manifest.sig")));
+
+  manifest.signing.signatureFile = "manifest.sig";
+  manifest.signing.publicKey = Buffer.from("not a public key").toString("base64");
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const malformedKey = verifyBundle(artifactDir, { cwd, key: publicPath });
+  assert.equal(malformedKey.ok, false);
+  assert.ok(malformedKey.errors.some((error) => error.includes("must encode an ed25519 public key")));
 });
 
 test("a bundle signed by an attacker fails against the original key", async () => {
