@@ -3,8 +3,8 @@
 **Paused:** 2026-08-04, credits low. Work stopped cleanly; nothing is half-applied.
 
 **Branch:** `dogfood-0.4.0-remediation` (off `main` @ `6086965`)
-**HEAD:** `e512b52`
-**State:** `npm test` → **110/110 green**. Working tree clean except untracked `.claude/`.
+**HEAD:** `aadd335`
+**State:** `npm test` → **117/117 green**. Working tree clean except untracked `.claude/`.
 **Nothing has been pushed, tagged, or published.**
 
 ---
@@ -13,8 +13,8 @@
 
 ```bash
 cd ~/projects/proofofworks/dogfood
-git log --oneline -3          # expect e512b52, a7dfb9d, 6086965
-npm test                      # expect 110/110
+git log --oneline -4          # expect aadd335, ce18e0b, e512b52, a7dfb9d
+npm test                      # expect 117/117
 ```
 
 Then read **`.workflows/PLAN.md`** — the full approved plan, phase by phase. This file is only the bookmark.
@@ -80,8 +80,12 @@ Run `p15.js`.
 - **JUnit-XML adapter** — binds an AC to a named testcase (`classname` + `name`), covering pytest/Vitest/Go. Additive enum member, contract stays v2. A selector matching nothing must **FAIL** — that's the `--grep`-matched-nothing false green. No stdout fallback.
 - **Publish prep** — drop `private: true`, `docs/` into `files[]`, `publishConfig.access: public`, `prepublishOnly`, `action.yml`, `RELEASE.md`. **Prepare only.**
 
-### P2 — docs
-Run `p2.js`. Build `test/docs.test.mjs` **first**, then write prose against a live gate.
+### P2 — docs (PARTIAL — `aadd335`)
+**Already landed:** `test/docs.test.mjs` (the gate), the nine `docs/*.md` reference files, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `docs/` added to `files[]`.
+
+**Still outstanding:** the README cut (still ~564 lines, needs to drop to ~150 with reference material removed and a TOC added), the `AGENTS.md` rewrite (it still lists 3 of 8 commands and omits `--policy`), `docs/signing.md` and `docs/junit.md` (both blocked on P1.5 shipping those features), and the Prove phase — nobody has yet executed every fenced bash block or had a first-time reader follow the quickstart.
+
+Re-run `p2.js` with the Reference phase trimmed, or just its Front + Prove phases.
 
 README goes 564 → ~150 lines; reference material moves to `docs/`. Known defects to fix: `--json` and `--contract` appear **nowhere** in the README; all 14 policy fields are undocumented; **two README contract examples fail the tool's own schema validation**; `AGENTS.md` lists 3 of 8 commands and omits `--policy` entirely.
 
