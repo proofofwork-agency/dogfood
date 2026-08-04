@@ -2,30 +2,33 @@
 
 **Nothing in this file has been executed.** Every command below is for a human to run by hand.
 
-> ## Status: BLOCKED — do not release yet
+> ## Status: READY FOR HUMAN REVIEW — not released
 >
-> As of `affc619`, this package is **not ready to publish**. `package.json` still says `"version": "0.3.0"` and `"private": true`, the manifest is still v3, and three phases of planned work are incomplete. See [Blockers](#blockers).
+> As of `2b380ad`, every blocker below is cleared except two that are deliberate. `npm test` is
+> 129/129, coverage 91.8%, the tool verifies its own signed bundle, and `npm pack` ships a clean
+> file list. **Nothing has been published, pushed, or tagged.**
 >
-> Releasing now would ship a package whose README describes features it does not have.
+> Two things are knowingly out of scope for 0.4.0:
+>
+> 1. **JUnit-XML adapter — deferred to 0.5.0.** It is a new feature, not a fix. 0.4.0 is the
+>    integrity-and-signing release; adding a third adapter would widen the blast radius of a release
+>    whose whole point is that the existing claims are now true. `docs/junit.md` is deferred with it.
+> 2. **Fork-PR CI validation — cannot be automated.** `test/workflow.test.mjs` pins the invariants
+>    offline (no duplicate check names, no `checks: write`, no `${{ }}` in `run:`), but only a real
+>    PR from a fork proves the end-to-end behavior. Do it in step 7 before relying on the gate.
 
----
+## Cleared
 
-## Blockers
-
-| # | Blocker | Where |
-|---|---|---|
-| 1 | **P1.5 untouched** — no `src/sign.mjs`, no manifest v4, no JUnit adapter, no `action.yml` | see `RESUME.md` |
-| 2 | **`private: true` still set**, version still `0.3.0` | `package.json` |
-| 3 | **README still ~564 lines** and documents the pre-P0 CI job layout | `README.md:319` |
-| 4 | **`AGENTS.md` still lists 3 of 8 commands** and never mentions `--policy` | `AGENTS.md` |
-| 5 | **`docs/signing.md` and `docs/junit.md` missing** — blocked on blocker 1 | `docs/` |
-| 6 | **Integrity notice still says "signing is deferred"** — becomes false the moment signing lands | `src/report.mjs:202`, `src/verify.mjs:7` |
-| 7 | **P3 untouched** — duplicated helpers still present (`sha256` ×4, three containment impls, four git wrappers) | see `RESUME.md` |
-| 8 | **No final evaluation** with executed evidence has been run | — |
-
-Work through `RESUME.md`, then come back here.
-
----
+| Was blocking | Now |
+|---|---|
+| No signing; manifest v3 | Manifest v4 with detached ed25519 signatures (`1b0659d`) |
+| `private: true`, version `0.3.0` | `0.4.0`, `publishConfig.access: public`, `prepublishOnly` (`aec6b5f`) |
+| README ~564 lines, stale CI description | 147 lines, reference material in `docs/` |
+| `AGENTS.md` listed 3 of 8 commands | Full command list, exit codes, and the signing caveat |
+| `docs/signing.md` missing | Written, trust model first |
+| Integrity notice said "signing is deferred" | Now describes what the signature does and does not prove |
+| `sha256` ×4, `safeSegment` ×3, `formatAjvError` ×2 | One implementation each (`2b380ad`) |
+| No evaluation with executed evidence | Run; results in the commit history and below |
 
 ## 1. Preflight — all must pass
 
@@ -49,7 +52,7 @@ RUN=$(node -p "JSON.parse(require('fs').readFileSync('artifacts/dogfood/latest.j
 node bin/dogfood.mjs verify "artifacts/dogfood/$RUN"     # must be VERIFIED
 ```
 
-Once signing exists (blocker 1), also confirm the trust model actually holds:
+Then confirm the trust model actually holds. This is the check that decides whether signing means anything:
 
 ```bash
 node bin/dogfood.mjs keygen --out /tmp/dfkeys
@@ -82,10 +85,11 @@ Read that file list yourself. Confirm it contains `bin/`, `src/`, `schemas/`, `t
 
 ## 3. Version and changelog
 
+Already done in `aec6b5f` — verify rather than redo:
+
 ```bash
-# edit package.json by hand: version -> 0.4.0, remove "private": true
-# add:  "publishConfig": { "access": "public" }
-# add:  "prepublishOnly": "npm test && node scripts/check-package-contents.mjs"
+node -p "const p=require('./package.json'); [p.version, p.private, p.publishConfig?.access].join(' | ')"
+# expect: 0.4.0 | undefined | public
 ```
 
 `@proofofwork-agency/dogfood` is scoped, and scoped packages default to **restricted** — without `publishConfig.access` the publish will either fail or silently go private.
@@ -141,7 +145,7 @@ Also confirm a fork PR can pass. No job may request `checks: write`; a fork's `G
 
 ## 8. Marketplace listing (optional)
 
-Requires `action.yml` at the repo root (blocker 1). Once tagged, GitHub offers to publish the action from the release page. The listing needs a name, description, icon, and colour.
+`action.yml` is at the repo root. Once tagged, GitHub offers to publish the action from the release page. The listing needs a name, description, icon, and colour.
 
 ---
 
