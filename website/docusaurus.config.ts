@@ -29,7 +29,7 @@ const config: Config = {
           path: "../docs",
           sidebarPath: "./sidebars.ts",
           routeBasePath: "docs",
-          editUrl: "https://github.com/proofofwork-agency/dogfood/edit/main/docs/",
+          editUrl: "https://github.com/proofofwork-agency/dogfood/edit/main/",
           showLastUpdateTime: true,
         },
         blog: false,

@@ -219,3 +219,66 @@
   .hero { padding: 3.5rem 0 3rem; }
   .row { grid-template-columns: 1fr; gap: 0.35rem; }
 }
+
+/* Compatibility sits between the two ledgers and the close; a three-up so it does not read
+   as another ledger row, but with the same rules and no card chrome. */
+.harness {
+  border-top: 1px solid var(--df-line);
+  margin-top: 3.5rem;
+}
+
+.harnessInner {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 3.5rem;
+}
+
+.harnessInner h2 {
+  margin: 0 0 0.6rem;
+  font-size: clamp(1.6rem, 2.9vw, 2.05rem);
+  letter-spacing: -0.022em;
+}
+
+.harnessLede {
+  max-width: 42rem;
+  margin: 0 0 2.4rem;
+  color: var(--df-dim);
+  font-size: 1rem;
+  line-height: 1.66;
+}
+
+.harnessRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 2rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--df-rule);
+}
+
+.harnessRow h3 {
+  margin: 0 0 0.5rem;
+  padding-top: 0.9rem;
+  border-top: 2px solid var(--ifm-color-primary);
+  font-size: 0.98rem;
+  letter-spacing: -0.01em;
+}
+
+.harnessRow p {
+  margin: 0;
+  color: var(--df-dim);
+  font-size: 0.93rem;
+  line-height: 1.62;
+}
+
+.harnessRow code {
+  border-color: var(--df-line);
+  font-size: 0.84em;
+}
+
+.harnessNote {
+  margin: 1.8rem 0 0;
+  max-width: 46rem;
+  color: var(--df-dim);
+  font-size: 0.94rem;
+  line-height: 1.62;
+}

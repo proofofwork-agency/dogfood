@@ -135,6 +135,52 @@ function Ledger({
   )
 }
 
+function Harnesses() {
+  return (
+    <section className={styles.harness}>
+      <div className={styles.harnessInner}>
+        <span className={styles.sectionLabel}>compatibility</span>
+        <Heading as="h2">Works with your agent, whichever it is</Heading>
+        <p className={styles.harnessLede}>
+          Dogfood is a CLI. It reads a contract, runs commands, and exits with a status code. There
+          is no plugin API, no daemon and no SDK — so anything that can run a command and read an
+          exit code already works.
+        </p>
+
+        <div className={styles.harnessRow}>
+          <div>
+            <h3>Claude Code and Codex</h3>
+            <p>
+              <code>dogfood init</code> installs the same skill at{" "}
+              <code>.claude/skills/dogfood/</code> and <code>.agents/skills/dogfood/</code>. Two
+              paths, one byte-identical file.
+            </p>
+          </div>
+          <div>
+            <h3>Cursor, Aider, Copilot, the rest</h3>
+            <p>
+              Nothing to install. Point the agent at the vendor-neutral skill file, or paste it into
+              your rules. The gate behaves identically either way.
+            </p>
+          </div>
+          <div>
+            <h3>CI and humans</h3>
+            <p>
+              A composite Action and a workflow template ship with the package. A person at a
+              terminal runs the same binary and gets the same verdict.
+            </p>
+          </div>
+        </div>
+
+        <p className={styles.harnessNote}>
+          A gate an agent can configure is a gate the agent can weaken. The integration surface is
+          exit codes and files, deliberately. <Link to="/docs/agents">Agent operation →</Link>
+        </p>
+      </div>
+    </section>
+  )
+}
+
 function Closing() {
   return (
     <section className={styles.closing}>
@@ -180,6 +226,7 @@ export default function Home(): ReactNode {
           rows={limits}
           tone="pass"
         />
+        <Harnesses />
         <Closing />
       </main>
     </Layout>

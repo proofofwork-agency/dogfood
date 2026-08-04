@@ -52,6 +52,29 @@ inside the bundle itself.
 
 All deterministic criteria block regardless of `severity`. Warnings never change the verdict.
 
+## Works with any agent
+
+Dogfood is a CLI. It reads a contract, runs commands, and exits with a status code. There is no
+plugin API, no daemon, and no SDK — the only harness-specific line in the entire runtime is the one
+in `dogfood init` that decides where to copy a Markdown file.
+
+| Harness | Integration | Shipped for it |
+|---|---|---|
+| **Claude Code** | Runs the CLI; `init` installs a skill at `.claude/skills/dogfood/SKILL.md` | A skill file |
+| **Codex** | Runs the CLI; `init` installs the same skill at `.agents/skills/dogfood/SKILL.md` | A skill file |
+| **Cursor, Aider, Copilot, Devin, others** | Run the CLI; point the agent at the vendor-neutral skill file or paste it into your rules | Nothing needed |
+| **Plain CI** | Run the CLI, gate on the exit code | A composite Action and a workflow template |
+| **A human** | Run the CLI | — |
+
+The two skill files are byte-identical copies of one template. `.claude/skills/` is Claude Code's
+convention; `.agents/skills/` is the vendor-neutral one. If your tool reads neither, it is still
+plain Markdown.
+
+A human, a CI job, Claude Code, and Codex run the same binary against the same contract and get the
+same verdict. There is no plugin API on purpose: **a gate an agent can configure is a gate the agent
+can weaken.** The integration surface is exit codes, `--json`, and pointer files — see
+[agent operation](docs/agents.md).
+
 ## Why it is small
 
 Three runtime dependencies: `ajv`, `ajv-formats`, `yaml`. Signing uses `node:crypto` and adds
