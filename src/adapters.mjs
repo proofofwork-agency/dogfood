@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson, safeSegment } from "./files.mjs";
 import { createDocumentRedactor, createRedactor, DEFAULT_LOG_POLICY, redactDeep } from "./redact.mjs";
 
 export const ADAPTER_VERSIONS = Object.freeze({
@@ -313,6 +313,3 @@ function capDetail(value) {
   return value.length > 120 ? `${value.slice(0, 117)}...` : value;
 }
 
-function safeSegment(value) {
-  return String(value).replace(/[^A-Za-z0-9._-]+/g, "_");
-}

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { formatAjvError } from "./ajv-errors.mjs";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -31,7 +32,7 @@ export function validateContract(contract) {
   const errors = [];
   const warnings = [];
   if (!validateContractSchema(contract)) {
-    errors.push(...validateContractSchema.errors.map(formatAjvError));
+    errors.push(...validateContractSchema.errors.map((error) => formatAjvError(error, "contract")));
   }
 
   if (!contract || typeof contract !== "object" || Array.isArray(contract)) {
@@ -191,22 +192,6 @@ export function validateAdvisoryReceipt(receipt) {
   };
 }
 
-function formatAjvError(error, root = "contract") {
-  const path = error.instancePath ? error.instancePath.slice(1).replaceAll("/", ".") : root;
-  if (error.keyword === "additionalProperties") {
-    return `${path}: unknown field "${error.params.additionalProperty}"`;
-  }
-  if (error.keyword === "required") {
-    return `${path}: missing required field "${error.params.missingProperty}"`;
-  }
-  if (error.keyword === "const") {
-    return `${path}: must be ${JSON.stringify(error.params.allowedValue)}`;
-  }
-  if (error.keyword === "enum") {
-    return `${path}: must be one of ${error.params.allowedValues.map(JSON.stringify).join(", ")}`;
-  }
-  return `${path}: ${error.message}`;
-}
 
 function unique(values) {
   return [...new Set(values)];

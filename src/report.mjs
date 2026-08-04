@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, rmdirSync } from "node:fs";
 import { arch, platform, release } from "node:os";
 import { join } from "node:path";
 import { ADAPTER_VERSIONS } from "./adapters.mjs";
+import { sha256 } from "./hash.mjs";
 import { atomicWriteFile, atomicWriteJson, portableRelative, sweepPendingTemps } from "./files.mjs";
 import { createDocumentRedactor } from "./redact.mjs";
 
@@ -373,9 +373,6 @@ export function listFiles(root) {
 
 export { portableRelative };
 
-export function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 function deduplicateProblems(problems) {
   const seen = new Set();
@@ -397,3 +394,6 @@ function hardLinkCount(path) { try { return lstatSync(path).nlink; } catch { ret
 function escapeCell(value) { return String(value ?? "").replaceAll("|", "\\|").replace(/[\r\n]+/g, " "); }
 function escapeInline(value) { return String(value).replaceAll("`", "\\`").replace(/[\r\n]+/g, " "); }
 function xml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
+
+// Re-exported for callers that already depend on report.mjs for bundle helpers.
+export { sha256 };

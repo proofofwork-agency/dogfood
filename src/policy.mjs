@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
+import { formatAjvError } from "./ajv-errors.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -30,7 +31,7 @@ export function loadPolicyDocument(cwd, explicitPath) {
     throw new ContractInputError(`Could not parse policy ${path}: ${error.message}`, { cause: error });
   }
   const ok = validateSchema(policy);
-  const errors = ok ? [] : validateSchema.errors.map(formatAjvError);
+  const errors = ok ? [] : validateSchema.errors.map((error) => formatAjvError(error, "policy"));
   return { policy, raw, path, validation: { ok, errors: [...new Set(errors)] } };
 }
 
@@ -90,11 +91,3 @@ export function validateProtectedPaths(cwd, paths) {
   return { ok: errors.length === 0, errors };
 }
 
-function formatAjvError(error) {
-  const path = error.instancePath ? error.instancePath.slice(1).replaceAll("/", ".") : "policy";
-  if (error.keyword === "additionalProperties") return `${path}: unknown field "${error.params.additionalProperty}"`;
-  if (error.keyword === "required") return `${path}: missing required field "${error.params.missingProperty}"`;
-  if (error.keyword === "const") return `${path}: must be ${JSON.stringify(error.params.allowedValue)}`;
-  if (error.keyword === "enum") return `${path}: must be one of ${error.params.allowedValues.map(JSON.stringify).join(", ")}`;
-  return `${path}: ${error.message}`;
-}

@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { listBundleEntries, sha256 } from "./report.mjs";
+import { sha256 } from "./hash.mjs";
+import { listBundleEntries } from "./report.mjs";
 import { embeddedPublicKey, loadPublicKey, SIGNATURE_FILE, verifyManifestSignature } from "./sign.mjs";
 
 const NOTICE_UNSIGNED = "Integrity verification proves internal consistency, not cryptographic provenance. A malicious actor can regenerate this unsigned manifest. Sign it with dogfood run --sign to bind it to a key.";

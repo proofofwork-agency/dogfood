@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isPathInside, portableRelative } from "./files.mjs";
+import { sha256 } from "./hash.mjs";
 
 /**
  * Every rejection here becomes report text, so each one names the subject the way the rest of the
@@ -98,6 +99,3 @@ function packageVersion(path) {
   }
 }
 
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}

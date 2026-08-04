@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify as stringifyYaml } from "yaml";
 import { collectAdvisoryEvidence } from "./advisory.mjs";
+import { sha256 } from "./hash.mjs";
 import { loadPrivateKey, signingBlock, signManifest } from "./sign.mjs";
 import { compareBaseline } from "./baseline.mjs";
 import { collectRuntimeMetadata, inspectBuildSubject } from "./build.mjs";
@@ -384,5 +385,4 @@ function invalidAcceptanceCriteria(contract) {
   }));
 }
 
-function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 export function portablePath(from, to) { return portableRelative(from, to); }

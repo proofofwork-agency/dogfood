@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { evaluateAdapter, prepareAdapter } from "./adapters.mjs";
-import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson, safeSegment } from "./files.mjs";
 import { createDocumentRedactor, createRedactor, redactDeep } from "./redact.mjs";
 import {
   authoritativeRepositoryProblems,
@@ -295,9 +295,6 @@ function terminateTree(pid, signal) {
   }
 }
 
-function safeSegment(value) {
-  return String(value).replace(/[^A-Za-z0-9._-]+/g, "_");
-}
 
 function createCapture() {
   return { chunks: [], bytes: 0, truncated: false };

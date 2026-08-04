@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createReadStream, lstatSync, readlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { normalizeGitPath, portableRelative, tryRealpath } from "./files.mjs";
+import { sha256, sha256File } from "./hash.mjs";
 
 // Git hardcodes the empty tree, so it resolves even in a repository that holds no objects yet.
 const EMPTY_TREE_OID = Object.freeze({
@@ -317,16 +318,4 @@ function cleanError(value) {
   return String(value || "").trim().split("\n").filter(Boolean).pop() || "";
 }
 
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
 
-function sha256File(path) {
-  return new Promise((resolvePromise, reject) => {
-    const hash = createHash("sha256");
-    const stream = createReadStream(path);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolvePromise(hash.digest("hex")));
-  });
-}

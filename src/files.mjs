@@ -169,3 +169,8 @@ function stripLongPathPrefix(path) {
   if (value.startsWith("//?/")) return value.slice(4);
   return value;
 }
+
+/** Filename-safe segment. Log dirs and evidence files must agree, so there is one of these. */
+export function safeSegment(value) {
+  return String(value).replace(/[^A-Za-z0-9._-]+/g, "_");
+}

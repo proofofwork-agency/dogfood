@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { atomicWriteFile, atomicWriteJson, isPathInside } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson, isPathInside, safeSegment } from "./files.mjs";
 import { validateAdvisoryReceipt } from "./validate.mjs";
 
 /**
@@ -88,7 +88,6 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
 }
 
 // A copied basename becomes a bundle path, so it may not carry separators or non-portable bytes.
-function safeSegment(value) { return String(value).replace(/[^A-Za-z0-9._-]+/g, "_"); }
 
 function safeWorkspacePath(input, workspace, cwd) {
   const candidate = isAbsolute(input) ? input : resolve(cwd, input);
