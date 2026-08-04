@@ -76,6 +76,12 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
   every fork PR permanently red.
 - `--baseline-ref` reached `git show` unsanitized, where `--output=` is an arbitrary-file-write
   primitive. Leading dashes are rejected and the resolved OID is passed instead of the user string.
+- **Renaming the contract skipped every baseline regression rule.** Moving the contract in the same
+  change set that weakened it read as "first adoption", so a rename plus a removed deterministic
+  criterion passed. Verified as a live bypass, then closed: a contract missing at its current path
+  is now looked for at every other discovery path in the baseline commit before first adoption is
+  concluded, and a move is compared against its previous location and recorded as a
+  `contract-moved` change requiring review.
 - **A contract format change could never pass its own baseline check.** A baseline contract that
   does not validate under the current schema was a blocking error, so the commit introducing any
   format change was permanently red — the tool was structurally unable to evolve its own format.

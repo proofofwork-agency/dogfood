@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { extname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isPathInside, normalizeGitPath, portableRelative, tryRealpath } from "./files.mjs";
+import { CONTRACT_CANDIDATES } from "./load-contract.mjs";
 import { validateContract } from "./validate.mjs";
 
 export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
@@ -11,6 +12,7 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
     resolvedRef: null,
     found: false,
     compared: false,
+    comparedPath: null,
     notComparedReason: null,
     errors: [],
     warnings: [],
@@ -42,13 +44,27 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
     return result;
   }
   result.resolvedRef = resolvedRef;
-  const source = git(root, ["show", `${resolvedRef}:${rel}`], 10 * 1024 * 1024);
+  let source = git(root, ["show", `${resolvedRef}:${rel}`], 10 * 1024 * 1024);
+  let comparedPath = rel;
   if (source.status !== 0) {
-    result.notComparedReason = "baseline-absent";
-    result.warnings.push(`baseline contract is absent at ${ref}:${rel}; treating this as first adoption`);
-    return result;
+    // "Absent at this path" is not the same as "absent". Moving or renaming the contract in the
+    // same change set would otherwise read as first adoption and silently skip every regression
+    // rule — a rename plus a removed deterministic criterion would pass. So before believing this
+    // is a first adoption, look for a contract at any discovery path in the baseline commit.
+    const moved = findBaselineContract(root, resolvedRef, rel);
+    if (moved) {
+      source = moved.source;
+      comparedPath = moved.path;
+      result.changes.push(change("contract-moved", null, "contractPath", moved.path, rel, true));
+      result.warnings.push(`contract moved from ${moved.path} to ${rel} since ${ref}; the baseline was compared against its previous location`);
+    } else {
+      result.notComparedReason = "baseline-absent";
+      result.warnings.push(`baseline contract is absent at ${ref}:${rel}; treating this as first adoption`);
+      return result;
+    }
   }
   result.found = true;
+  result.comparedPath = comparedPath;
   let baseline;
   try {
     baseline = extname(contractPath).toLowerCase() === ".json"
@@ -143,6 +159,20 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
     }
   }
   return result;
+}
+
+/**
+ * The contract as it existed at the baseline, wherever it lived then. Only the standard discovery
+ * paths are searched: a contract at an arbitrary path was reached through an explicit --contract,
+ * and guessing at it would compare against a document the project never treated as its contract.
+ */
+function findBaselineContract(root, resolvedRef, currentRel) {
+  for (const candidate of CONTRACT_CANDIDATES) {
+    if (candidate === currentRel) continue;
+    const source = git(root, ["show", `${resolvedRef}:${candidate}`], 10 * 1024 * 1024);
+    if (source.status === 0) return { source, path: candidate };
+  }
+  return null;
 }
 
 function compareNamedDefinitions(changes, collection, beforeValues, afterValues, fields) {

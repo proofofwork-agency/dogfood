@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { stringify as stringifyYaml } from "yaml";
@@ -157,4 +157,56 @@ test("an unparseable baseline still blocks, because no format change explains it
   assert.equal(result.report.verdict, "INVALID");
   assert.equal(result.report.baseline.notComparedReason, "baseline-unparseable");
   assert.ok(result.report.validation.errors.some((error) => /could not be parsed/.test(error)));
+});
+
+test("moving the contract does not skip the regression check", async () => {
+  // Without this, renaming the contract and weakening it in the same change set reads as first
+  // adoption and every baseline rule is silently skipped. That is a bypass, not an edge case.
+  const cwd = baselineProject();
+  const weakened = twoCriteria();
+  weakened.acceptanceCriteria = weakened.acceptanceCriteria.filter((item) => item.id !== "AC-second");
+  writeFileSync(join(cwd, ".dogfood", "dogfood.contract.yml"), stringifyYaml(weakened, { lineWidth: 0 }));
+  rmSync(join(cwd, ".dogfood", "dogfood.contract.yaml"));
+
+  const result = await runDogfood({
+    cwd,
+    contract: ".dogfood/dogfood.contract.yml",
+    policy: ".dogfood/policy.yaml",
+    baselineRef: "HEAD",
+    validateOnly: true,
+  });
+  assert.equal(result.report.verdict, "INVALID", "a rename must not launder a removed criterion");
+  assert.ok(result.report.validation.errors.some((error) => /removed deterministic criterion AC-second/.test(error)));
+  assert.ok(result.report.validation.warnings.some((warning) => /contract moved from/.test(warning)));
+  assert.ok(result.report.baseline.changes.some((item) => item.type === "contract-moved" && item.reviewRequired));
+});
+
+test("a move with no weakening is recorded for review and still passes", async () => {
+  const cwd = baselineProject();
+  writeFileSync(join(cwd, ".dogfood", "dogfood.contract.yml"), stringifyYaml(twoCriteria(), { lineWidth: 0 }));
+  rmSync(join(cwd, ".dogfood", "dogfood.contract.yaml"));
+
+  const result = await runDogfood({
+    cwd,
+    contract: ".dogfood/dogfood.contract.yml",
+    policy: ".dogfood/policy.yaml",
+    baselineRef: "HEAD",
+    validateOnly: true,
+  });
+  assert.equal(result.report.verdict, "VALID", JSON.stringify(result.report.validation.errors));
+  assert.equal(result.report.baseline.comparedPath, ".dogfood/dogfood.contract.yaml");
+  assert.equal(result.report.baseline.compared, true);
+});
+
+test("a genuine first adoption is still a warning, not a phantom comparison", async () => {
+  const cwd = createProject();
+  writeFileSync(join(cwd, ".dogfood", "policy.yaml"), stringifyYaml(authoritativePolicy()));
+  rmSync(join(cwd, ".dogfood", "dogfood.contract.yaml"));
+  git(cwd, ["add", "-A"]);
+  git(cwd, ["commit", "-qm", "no contract anywhere"]);
+  writeContract(cwd, twoCriteria());
+
+  const result = await runDogfood({ cwd, policy: ".dogfood/policy.yaml", baselineRef: "HEAD", validateOnly: true });
+  assert.equal(result.report.baseline.notComparedReason, "baseline-absent");
+  assert.ok(result.report.validation.warnings.some((warning) => /first adoption/.test(warning)));
 });

@@ -238,7 +238,7 @@ function nextSteps(verdict, hardFails, validateOnly) {
     return ["Recover the environment or runner.", "Start a fresh complete `dogfood run`; this run is not reusable as proof."];
   }
   const steps = ["Do not treat this run as proof of acceptance."];
-  if (hardFails.some((problem) => problem.kind === "contract")) steps.push("Fix the v2 contract, policy, baseline regression, or oracle mappings, then start a fresh run.");
+  if (hardFails.some((problem) => problem.kind === "contract")) steps.push("Fix the contract, policy, baseline regression, or oracle mappings, then start a fresh run.");
   if (hardFails.some((problem) => problem.kind === "mutation")) steps.push("Remove mutation from verification commands; Dogfood never accepts a self-changing proof.");
   if (hardFails.some((problem) => problem.kind === "command" || problem.kind === "acceptance-criterion")) steps.push("Re-implement against the failing evidence, or re-refine only if the criterion is wrong.");
   if (hardFails.some((problem) => problem.kind === "evidence")) steps.push("Restore exact structured evidence; a successful process without its evidence cannot pass.");
