@@ -108,3 +108,53 @@ test("missing baseline contract is a first-adoption warning", async () => {
   assert.equal(report.verdict, "VALID");
   assert.ok(report.validation.warnings.some((warning) => warning.includes("first adoption")));
 });
+
+test("a baseline in a different contract format warns instead of blocking, and still validates the head", async () => {
+  // The baseline is committed under a version this build no longer accepts — exactly what any
+  // format change produces for the commit that introduces it. Blocking here would make the tool
+  // structurally unable to ever change its own format.
+  const cwd = baselineProject();
+  const stale = twoCriteria();
+  stale.version = 2;
+  writeContract(cwd, stale);
+  git(cwd, ["add", ".dogfood/dogfood.contract.yaml"]);
+  git(cwd, ["commit", "-qm", "contract in an older format"]);
+  writeContract(cwd, twoCriteria());
+
+  const result = await runDogfood({ cwd, policy: ".dogfood/policy.yaml", baselineRef: "HEAD", validateOnly: true });
+  assert.equal(result.report.verdict, "VALID", JSON.stringify(result.report.validation.errors));
+  assert.equal(result.report.baseline.compared, false);
+  assert.equal(result.report.baseline.notComparedReason, "baseline-invalid");
+  assert.ok(
+    result.report.validation.warnings.some((warning) => /no regression comparison was performed/.test(warning)),
+    "the skipped comparison must be stated, never silent",
+  );
+  assert.deepEqual(result.report.validation.errors, []);
+});
+
+test("degrading an unusable baseline does not weaken detection on a usable one", async () => {
+  // The other direction: with a baseline that *is* comparable, removing a deterministic criterion
+  // must still block. This is the assertion that stops the warning above from becoming a bypass.
+  const cwd = baselineProject();
+  const removed = twoCriteria();
+  removed.acceptanceCriteria = removed.acceptanceCriteria.filter((item) => item.id !== "AC-second");
+  writeContract(cwd, removed);
+
+  const result = await runDogfood({ cwd, policy: ".dogfood/policy.yaml", baselineRef: "HEAD", validateOnly: true });
+  assert.equal(result.report.verdict, "INVALID");
+  assert.equal(result.report.baseline.compared, true);
+  assert.ok(result.report.validation.errors.some((error) => /removed deterministic criterion AC-second/.test(error)));
+});
+
+test("an unparseable baseline still blocks, because no format change explains it", async () => {
+  const cwd = baselineProject();
+  writeFileSync(join(cwd, ".dogfood", "dogfood.contract.yaml"), "version: 1\n  broken: [unclosed\n");
+  git(cwd, ["add", ".dogfood/dogfood.contract.yaml"]);
+  git(cwd, ["commit", "-qm", "corrupt contract"]);
+  writeContract(cwd, twoCriteria());
+
+  const result = await runDogfood({ cwd, policy: ".dogfood/policy.yaml", baselineRef: "HEAD", validateOnly: true });
+  assert.equal(result.report.verdict, "INVALID");
+  assert.equal(result.report.baseline.notComparedReason, "baseline-unparseable");
+  assert.ok(result.report.validation.errors.some((error) => /could not be parsed/.test(error)));
+});

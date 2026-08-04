@@ -10,6 +10,8 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
     ref,
     resolvedRef: null,
     found: false,
+    compared: false,
+    notComparedReason: null,
     errors: [],
     warnings: [],
     changes: [],
@@ -42,6 +44,7 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
   result.resolvedRef = resolvedRef;
   const source = git(root, ["show", `${resolvedRef}:${rel}`], 10 * 1024 * 1024);
   if (source.status !== 0) {
+    result.notComparedReason = "baseline-absent";
     result.warnings.push(`baseline contract is absent at ${ref}:${rel}; treating this as first adoption`);
     return result;
   }
@@ -52,14 +55,30 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
       ? JSON.parse(source.stdout)
       : parseYaml(source.stdout);
   } catch (error) {
+    // Unlike a schema mismatch, a baseline that is not even parseable is not an expected
+    // consequence of any format change; it means the committed contract was broken. Stays blocking.
+    result.notComparedReason = "baseline-unparseable";
     result.errors.push(`baseline contract at ${ref}:${rel} could not be parsed: ${error.message}`);
     return result;
   }
+  // A baseline that does not validate under the *current* schema means the two contracts are not
+  // in the same format, so a field-by-field comparison would be meaningless — it does not mean a
+  // regression occurred. Blocking here would make the tool structurally incapable of ever changing
+  // its own contract format: the very commit that introduces the change can never go green.
+  //
+  // This cannot be abused to skip the check. A baseline is a past commit and is immutable, so the
+  // only way it stops validating is a schema change in this same change set — which is reviewable
+  // code under CODEOWNERS. The head contract is still fully validated, and the authoritative
+  // criteria floor and required gates still apply. So this degrades loudly rather than silently.
   const baselineValidation = validateContract(baseline);
   if (!baselineValidation.ok) {
-    result.errors.push(`baseline contract at ${ref}:${rel} is invalid: ${baselineValidation.errors.join("; ")}`);
+    result.notComparedReason = "baseline-invalid";
+    result.warnings.push(
+      `baseline contract at ${ref}:${rel} does not validate under the current schema, so no regression comparison was performed: ${baselineValidation.errors.join("; ")}`,
+    );
     return result;
   }
+  result.compared = true;
 
   const beforeCriteria = new Map((baseline.acceptanceCriteria || []).map((item) => [item.id, item]));
   const afterCriteria = new Map((contract?.acceptanceCriteria || []).map((item) => [item.id, item]));

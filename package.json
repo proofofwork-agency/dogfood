@@ -45,7 +45,7 @@
   ],
   "scripts": {
     "dogfood": "node bin/dogfood.mjs",
-    "test": "node --test test/adapters.test.mjs test/baseline.test.mjs test/cli.test.mjs test/contract.test.mjs test/docs.test.mjs test/files.test.mjs test/integration.test.mjs test/junit-adapter.test.mjs test/junit.test.mjs test/meta.test.mjs test/package-contents.test.mjs test/policy.test.mjs test/report.test.mjs test/runtime.test.mjs test/sign.test.mjs test/verify.test.mjs test/workflow.test.mjs",
+    "test": "node --test test/adapters.test.mjs test/baseline.test.mjs test/cli.test.mjs test/contract.test.mjs test/docs.test.mjs test/files.test.mjs test/integration.test.mjs test/junit-adapter.test.mjs test/junit-adversarial.test.mjs test/junit.test.mjs test/meta.test.mjs test/package-contents.test.mjs test/policy.test.mjs test/report.test.mjs test/runtime.test.mjs test/sign.test.mjs test/verify.test.mjs test/workflow.test.mjs",
     "prepublishOnly": "npm test && node scripts/check-package-contents.mjs",
     "test:playwright-fixture": "node test/playwright-fixture.mjs",
     "test:self": "cd examples/minimal && node ../../bin/dogfood.mjs run"

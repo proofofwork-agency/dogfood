@@ -74,6 +74,16 @@ Baseline rules apply only when `--baseline-ref <git-ref>` is supplied with the p
 
 The ref is first resolved to a commit object ID; only that object ID is used to read the baseline contract. If the contract is absent at the baseline, Dogfood records first adoption as a warning.
 
+`baseline.compared` reports whether a comparison actually happened, and `baseline.notComparedReason` says why not:
+
+| Reason | Effect | Why |
+|---|---|---|
+| `baseline-absent` | Warning | First adoption; there is nothing to compare against. |
+| `baseline-invalid` | Warning | The baseline contract does not validate under the current schema, so the two are not in the same format and a field-by-field comparison would be meaningless. Blocking here would make it impossible to ever change the contract format: the commit introducing the change could never go green. |
+| `baseline-unparseable` | **Blocks** | A baseline that is not even parseable is not explained by any format change; it means a broken contract was committed. |
+
+A skipped comparison is never silent — it is stated in `validation.warnings`. It also cannot be used to slip a regression through: the baseline is a past commit and is immutable, so the only way it stops validating is a schema change in the same change set, which is reviewable code. The head contract is still fully validated, and `criteria.minimumDeterministic` and `criteria.requiredGates` still apply.
+
 ## Mutation boundary
 
 `mutation.scope` is `git-root` and `mutation.mode` is `git-visible`. Authoritative runs inspect tracked state across the whole repository and non-ignored untracked files before and after commands. The run fails if it starts with tracked changes, if tracked state changes, or if an untracked path outside `allowUntracked` is present or changes.

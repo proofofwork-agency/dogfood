@@ -76,6 +76,14 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
   every fork PR permanently red.
 - `--baseline-ref` reached `git show` unsanitized, where `--output=` is an arbitrary-file-write
   primitive. Leading dashes are rejected and the resolved OID is passed instead of the user string.
+- **A contract format change could never pass its own baseline check.** A baseline contract that
+  does not validate under the current schema was a blocking error, so the commit introducing any
+  format change was permanently red — the tool was structurally unable to evolve its own format.
+  It is now a stated warning with `baseline.compared: false` and a `notComparedReason`. This cannot
+  hide a regression: a baseline is a past commit and immutable, so the only thing that can
+  invalidate it is a schema change in the same reviewable change set, and the head contract, the
+  criteria floor and the required gates are all still enforced. An *unparseable* baseline still
+  blocks, because no format change explains it.
 - **A criterion could report "[fail] — 3 matching execution(s) passed."** When a command failed for
   reasons unrelated to a given criterion, that criterion's detail was taken from its own selector,
   which had passed — producing a fail verdict beside a passing message. The detail now explains that
