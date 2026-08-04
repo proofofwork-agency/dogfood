@@ -7,7 +7,7 @@ Dogfood requires no agent framework. A human, CI job, Claude Code, or Codex runs
 - `.claude/skills/dogfood/SKILL.md`
 - `.agents/skills/dogfood/SKILL.md`
 
-The normative source is [the shipped skill template](../templates/skill/SKILL.md). Start a new agent session if a newly installed skill is not discovered immediately.
+The normative source is [the shipped skill template](https://github.com/proofofwork-agency/dogfood/blob/main/templates/skill/SKILL.md). Start a new agent session if a newly installed skill is not discovered immediately.
 
 ## Required behavior
 
@@ -21,7 +21,7 @@ Missing oracle means failure. Do not repair product code or tests during a proof
 
 ## Machine-readable integration
 
-Use `--json` on `validate`, `run`, or `verify`. The [workflow integration snippet](../templates/integration/implement-batch-hook.snippet.js) demonstrates parsing `dogfood run --json` and preserving exit-code semantics.
+Use `--json` on `validate`, `run`, or `verify`. The [workflow integration snippet](https://github.com/proofofwork-agency/dogfood/blob/main/templates/integration/implement-batch-hook.snippet.js) demonstrates parsing `dogfood run --json` and preserving exit-code semantics.
 
 `latest.json` selects executed proof. `latest-validate.json` selects validation-only output and must not be treated as evidence that commands ran.
 

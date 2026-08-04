@@ -1,0 +1,201 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  width: 100%;
+  max-width: 40rem;
+}
+
+.panel {
+  overflow: hidden;
+  border: 1px solid var(--df-line);
+  border-radius: 0.9rem;
+  background: var(--df-panel);
+  box-shadow: 0 24px 60px -32px rgba(5, 11, 9, 0.55);
+  transition: border-color 380ms ease, box-shadow 380ms ease;
+}
+
+/* The frame itself carries the verdict, so the result is legible before any text is read. */
+.panel.pass {
+  border-color: color-mix(in srgb, var(--df-pass) 55%, transparent);
+  box-shadow: 0 24px 70px -34px color-mix(in srgb, var(--df-pass) 60%, transparent);
+}
+
+.panel.fail {
+  border-color: color-mix(in srgb, var(--df-fail) 55%, transparent);
+  box-shadow: 0 24px 70px -34px color-mix(in srgb, var(--df-fail) 60%, transparent);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.7rem 0.95rem;
+  border-bottom: 1px solid var(--df-line);
+  background: var(--df-panel-2);
+}
+
+.bar span {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: var(--df-line);
+}
+
+.bar strong {
+  margin-left: 0.5rem;
+  overflow: hidden;
+  color: var(--df-dim);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.74rem;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.body {
+  padding: 1.1rem 1.15rem 1.25rem;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.82rem;
+}
+
+.claim {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  color: var(--ifm-heading-color);
+}
+
+.prompt {
+  color: var(--df-pass);
+  font-weight: 700;
+}
+
+/* The claim is deliberately styled as if it were trustworthy. That is the point of the scene. */
+.claimText {
+  padding: 0.05rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--df-pass) 40%, transparent);
+  border-radius: 999px;
+  color: var(--df-pass);
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0 0 1.05rem;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 5.4rem 1fr;
+  gap: 0.65rem;
+  align-items: baseline;
+  padding: 0.42rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  opacity: 0.28;
+  transform: translateY(4px);
+  transition: opacity 320ms ease, transform 320ms ease, border-color 320ms ease, background 320ms ease;
+}
+
+.step[data-revealed="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+.step.neutral { border-color: var(--df-line); background: var(--df-panel-2); }
+.step.pass { border-color: color-mix(in srgb, var(--df-pass) 45%, transparent); background: color-mix(in srgb, var(--df-pass) 9%, transparent); }
+.step.fail { border-color: color-mix(in srgb, var(--df-fail) 45%, transparent); background: color-mix(in srgb, var(--df-fail) 9%, transparent); }
+
+.stepLabel {
+  color: var(--df-dim);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stepDetail {
+  color: var(--ifm-font-color-base);
+  line-height: 1.45;
+}
+
+.step.fail .stepDetail { color: var(--df-fail); }
+.step.pass .stepDetail { color: var(--df-pass); }
+
+.verdictRow {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--df-line);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.verdictRow[data-settled="true"] { opacity: 1; }
+
+.verdictChip {
+  padding: 0.2rem 0.7rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.verdictChip.pass { color: var(--df-pass); }
+.verdictChip.fail { color: var(--df-fail); }
+
+.exit {
+  color: var(--df-dim);
+  font-size: 0.74rem;
+}
+
+.moral {
+  margin: 0;
+  min-height: 3.2rem;
+  color: var(--df-dim);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  animation: fade 420ms ease;
+}
+
+.moral code {
+  border-color: var(--df-line);
+  font-size: 0.85em;
+}
+
+@keyframes fade {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+
+.dots {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.dot,
+.dotActive {
+  width: 1.6rem;
+  height: 0.2rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--df-line);
+  cursor: pointer;
+  transition: background 260ms ease;
+}
+
+.dotActive { background: var(--ifm-color-primary); }
+
+@media (max-width: 640px) {
+  .step { grid-template-columns: 1fr; gap: 0.15rem; }
+}

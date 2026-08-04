@@ -4,7 +4,7 @@ Run these from a repository checkout after `npm ci`. Generated evidence stays un
 
 ## Minimal command adapters
 
-[examples/minimal](../examples/minimal) contains architecture and product commands, deterministic command oracles, one judgmental criterion, and one excluded criterion.
+[examples/minimal](https://github.com/proofofwork-agency/dogfood/tree/main/examples/minimal) contains architecture and product commands, deterministic command oracles, one judgmental criterion, and one excluded criterion.
 
 ```bash
 cd examples/minimal
@@ -15,7 +15,7 @@ Observed result: exit 0 and `PASS`; both deterministic criteria pass, the usabil
 
 ## Deliberately broken contract
 
-[examples/minimal-broken](../examples/minimal-broken) plants a deterministic criterion with no oracle.
+[examples/minimal-broken](https://github.com/proofofwork-agency/dogfood/tree/main/examples/minimal-broken) plants a deterministic criterion with no oracle.
 
 ```bash
 cd examples/minimal-broken
@@ -26,7 +26,7 @@ Observed result: exit 1 and `FAIL` during validation. No proof command is execut
 
 ## Exact Playwright evidence
 
-[examples/playwright](../examples/playwright) combines an architecture command with an exact `@dogfood:AC-checkout` browser tag.
+[examples/playwright](https://github.com/proofofwork-agency/dogfood/tree/main/examples/playwright) combines an architecture command with an exact `@dogfood:AC-checkout` browser tag.
 
 ```bash
 cd examples/playwright

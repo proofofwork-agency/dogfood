@@ -1,0 +1,177 @@
+/**
+ * Two colours, because the product is a binary: a criterion was proven, or it was refused.
+ * A third accent would soften exactly the distinction the tool exists to make. Everything else is
+ * graphite. The site is styled to read like the artifact dogfood emits — a verification report —
+ * rather than like a product brochure.
+ */
+
+:root {
+  --ifm-color-primary: #0a7345;
+  --ifm-color-primary-dark: #09683e;
+  --ifm-color-primary-darker: #08623a;
+  --ifm-color-primary-darkest: #075130;
+  --ifm-color-primary-light: #0b7e4c;
+  --ifm-color-primary-lighter: #0c8450;
+  --ifm-color-primary-lightest: #0e9860;
+
+  --ifm-background-color: #fbfcfb;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-font-family-base: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ifm-font-family-monospace: "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
+  --ifm-heading-font-weight: 700;
+  --ifm-heading-color: #0a0f0d;
+  --ifm-code-font-size: 92%;
+  --ifm-navbar-height: 4rem;
+  --ifm-global-radius: 0.3rem;
+  --doc-sidebar-width: 18.5rem;
+
+  --df-pass: #0f9d58;
+  --df-fail: #d93025;
+  --df-line: rgba(10, 15, 13, 0.11);
+  --df-rule: rgba(10, 15, 13, 0.07);
+  --df-dim: #5a6661;
+  --df-panel: #ffffff;
+  --df-panel-2: #f4f6f5;
+}
+
+[data-theme="dark"] {
+  --ifm-color-primary: #3ddc84;
+  --ifm-color-primary-dark: #27d675;
+  --ifm-color-primary-darker: #1fcd6d;
+  --ifm-color-primary-darkest: #19a959;
+  --ifm-color-primary-light: #55e293;
+  --ifm-color-primary-lighter: #63e59c;
+  --ifm-color-primary-lightest: #8aedb6;
+
+  --ifm-background-color: #080b0a;
+  --ifm-background-surface-color: #0e1211;
+  --ifm-heading-color: #edf2ef;
+  --ifm-font-color-base: #b6c2bc;
+  --ifm-toc-border-color: rgba(255, 255, 255, 0.08);
+  --ifm-color-emphasis-200: rgba(255, 255, 255, 0.09);
+  --ifm-color-emphasis-300: rgba(255, 255, 255, 0.15);
+
+  --df-pass: #3ddc84;
+  --df-fail: #ff6b5e;
+  --df-line: rgba(255, 255, 255, 0.11);
+  --df-rule: rgba(255, 255, 255, 0.06);
+  --df-dim: #8b9a93;
+  --df-panel: #0e1211;
+  --df-panel-2: #131817;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  letter-spacing: -0.006em;
+}
+
+/* A plain hairline. No gradient — the decoration belonged to a different product. */
+.navbar {
+  border-bottom: 1px solid var(--df-line);
+  box-shadow: none;
+  backdrop-filter: blur(16px);
+}
+
+[data-theme="dark"] .navbar {
+  background: rgba(8, 11, 10, 0.88);
+}
+
+.navbar__title {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+}
+
+.navbar__link {
+  font-size: 0.92rem;
+}
+
+.footer {
+  border-top: 1px solid var(--df-line);
+  font-size: 0.9rem;
+}
+
+[data-theme="dark"] .footer {
+  --ifm-footer-background-color: #060908;
+}
+
+/* Verdict chips, reused in prose and on the landing page. */
+.verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.1em 0.55em;
+  border: 1px solid currentColor;
+  border-radius: 0.25em;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.verdict--pass { color: var(--df-pass); }
+.verdict--fail { color: var(--df-fail); }
+
+.theme-admonition-danger { border-left-color: var(--df-fail); }
+.theme-admonition-tip { border-left-color: var(--df-pass); }
+
+/* Documentation reads as a specification: quiet rules, generous leading, no ornament. */
+.markdown h2 {
+  margin-top: 2.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--df-rule);
+  font-size: 1.5rem;
+  letter-spacing: -0.015em;
+}
+
+.markdown h2:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.markdown table {
+  display: table;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.markdown table th {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--df-dim);
+}
+
+code {
+  border-color: var(--df-line);
+}
+
+.menu__link--active {
+  font-weight: 620;
+}
+
+.menu__list-item-collapsible .menu__link--sublist {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.74rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--df-dim);
+}
+
+/* Every animation here is decorative; the copy states the same claims without it. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

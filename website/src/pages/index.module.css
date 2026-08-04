@@ -1,0 +1,221 @@
+.hero {
+  position: relative;
+  padding: 5.5rem 0 4.5rem;
+  border-bottom: 1px solid var(--df-line);
+}
+
+/* A single quiet wash. No second colour up here — the panel carries the binary. */
+.hero::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: 0.55;
+  background: radial-gradient(52rem 24rem at 8% -12%, color-mix(in srgb, var(--df-pass) 13%, transparent), transparent 62%);
+}
+
+.heroGrid {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 3.5rem;
+  align-items: center;
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.heroCopy { max-width: 33rem; }
+
+.eyebrow {
+  margin: 0 0 1.5rem;
+  color: var(--df-dim);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.74rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0 0 1.2rem;
+  font-size: clamp(2.3rem, 4.6vw, 3.3rem);
+  line-height: 1.08;
+  letter-spacing: -0.032em;
+}
+
+/* One accent colour, applied flat. A gradient across three hues read as decoration. */
+.titleAccent { color: var(--ifm-color-primary); }
+
+.lede {
+  margin: 0 0 2rem;
+  color: var(--df-dim);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-bottom: 1.6rem;
+}
+
+.primaryCta,
+.secondaryCta {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.66rem 1.3rem;
+  border-radius: 0.3rem;
+  font-size: 0.94rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 170ms ease, border-color 170ms ease, color 170ms ease;
+}
+
+.primaryCta {
+  background: var(--ifm-color-primary);
+  color: #04120c;
+}
+
+.primaryCta:hover {
+  background: var(--ifm-color-primary-light);
+  color: #04120c;
+  text-decoration: none;
+}
+
+.secondaryCta {
+  border: 1px solid var(--df-line);
+  color: var(--ifm-heading-color);
+}
+
+.secondaryCta:hover {
+  border-color: var(--ifm-color-primary);
+  color: var(--ifm-heading-color);
+  text-decoration: none;
+}
+
+.install {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.install code {
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--df-line);
+  background: var(--df-panel-2);
+  font-size: 0.8rem;
+}
+
+.heroPanel {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.section {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 4.5rem 1.5rem 1rem;
+}
+
+.sectionHead {
+  max-width: 42rem;
+  margin-bottom: 2.2rem;
+}
+
+.sectionLabel {
+  display: block;
+  margin-bottom: 0.7rem;
+  color: var(--df-dim);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.72rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.sectionHead h2 {
+  margin: 0 0 0.6rem;
+  font-size: clamp(1.6rem, 2.9vw, 2.05rem);
+  letter-spacing: -0.022em;
+}
+
+.sectionHead p {
+  margin: 0;
+  color: var(--df-dim);
+  font-size: 1rem;
+  line-height: 1.66;
+}
+
+/*
+ * The ledger is the site's structural idea: a two-column record of term and evidence, ruled like
+ * the report the tool emits. It replaces the card grid, which belonged to a different product.
+ */
+.ledger {
+  margin: 0;
+  border-top: 1px solid var(--df-line);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  padding: 1.15rem 0 1.15rem 1rem;
+  border-bottom: 1px solid var(--df-rule);
+  border-left: 2px solid transparent;
+  transition: border-left-color 180ms ease, background 180ms ease;
+}
+
+.ledger.fail .row:hover { border-left-color: var(--df-fail); background: var(--df-panel-2); }
+.ledger.pass .row:hover { border-left-color: var(--df-pass); background: var(--df-panel-2); }
+
+.row dt {
+  margin: 0;
+  color: var(--ifm-heading-color);
+  font-size: 0.98rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.row dd {
+  margin: 0;
+  color: var(--df-dim);
+  font-size: 0.94rem;
+  line-height: 1.62;
+}
+
+.row dd code {
+  border-color: var(--df-line);
+  font-size: 0.86em;
+}
+
+.closing {
+  border-top: 1px solid var(--df-line);
+  margin-top: 3.5rem;
+  background: var(--df-panel-2);
+}
+
+.closingInner {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+}
+
+.closingInner h2 {
+  margin: 0 0 0.6rem;
+  font-size: clamp(1.55rem, 2.6vw, 1.95rem);
+  letter-spacing: -0.022em;
+}
+
+.closingInner p {
+  max-width: 40rem;
+  margin: 0 0 1.7rem;
+  color: var(--df-dim);
+  font-size: 1rem;
+  line-height: 1.66;
+}
+
+@media (max-width: 996px) {
+  .heroGrid { grid-template-columns: 1fr; gap: 2.75rem; }
+  .heroPanel { justify-content: flex-start; }
+  .hero { padding: 3.5rem 0 3rem; }
+  .row { grid-template-columns: 1fr; gap: 0.35rem; }
+}

@@ -2,8 +2,8 @@
 
 The repository workflow and generated template run the same CLI used locally:
 
-- [repository workflow](../.github/workflows/dogfood.yml)
-- [generated workflow template](../templates/ci/dogfood.yml)
+- [repository workflow](https://github.com/proofofwork-agency/dogfood/blob/main/.github/workflows/dogfood.yml)
+- [generated workflow template](https://github.com/proofofwork-agency/dogfood/blob/main/templates/ci/dogfood.yml)
 
 `dogfood init` also writes `.dogfood/github-workflow.dogfood.yml` and `.dogfood/CODEOWNERS.fragment`. Merge the relevant fragments into the host repository rather than assuming generated files alter GitHub settings.
 

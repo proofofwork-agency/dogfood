@@ -6,7 +6,7 @@ The `playwright-json` adapter binds a deterministic acceptance criterion to an e
 
 The command uses `adapter: playwright-json`. Its oracle uses `kind: playwright`, names that command, and declares a tag exactly equal to `@dogfood:<criterion id>`.
 
-Before the command starts, Dogfood removes any pre-existing report at the evidence path and injects `PLAYWRIGHT_JSON_OUTPUT_FILE`. This variable is a file path, not a directory. Configure Playwright so its JSON reporter honors that path; the shipped [configuration](../examples/playwright/playwright.config.mjs) also derives a nearby test-results directory.
+Before the command starts, Dogfood removes any pre-existing report at the evidence path and injects `PLAYWRIGHT_JSON_OUTPUT_FILE`. This variable is a file path, not a directory. Configure Playwright so its JSON reporter honors that path; the shipped [configuration](https://github.com/proofofwork-agency/dogfood/blob/main/examples/playwright/playwright.config.mjs) also derives a nearby test-results directory.
 
 ```js
 import { defineConfig } from "@playwright/test";
