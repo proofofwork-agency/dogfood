@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { captureRepositoryState, repositoryStateChanged } from "../src/repository.mjs";
+import {
+  authoritativeInitialProblems,
+  authoritativeRepositoryProblems,
+  captureRepositoryState,
+  MUTATION_PROBLEM_CODES,
+  repositoryStateChanged,
+} from "../src/repository.mjs";
 import { runCommand } from "../src/run-commands.mjs";
 import { runDogfood } from "../src/run.mjs";
 import { stringify as stringifyYaml } from "yaml";
@@ -81,6 +87,45 @@ test("timeouts terminate a command's complete process tree", { timeout: 15000 },
   }
 });
 
+test("timeout settlement is bounded when a detached grandchild retains the stdio pipes", { skip: process.platform === "win32", timeout: 10000 }, async () => {
+  const cwd = createProject(validContract(), {
+    "detached-parent.mjs": [
+      "import { spawn } from 'node:child_process';",
+      "spawn(process.execPath, ['-e', 'setTimeout(() => {}, 4000)'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"),
+  });
+  try {
+    const result = await runCommand("detached", "node detached-parent.mjs", { cwd, timeoutMs: 50 });
+    assert.equal(result.status, "infra");
+    assert.equal(result.timedOut, true);
+    assert.ok(result.durationMs < 3500, `timeout settled after ${result.durationMs}ms`);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("authoritative snapshots hash large untracked files and detect same-size rewrites with restored mtime", { timeout: 15000 }, async () => {
+  const cwd = createProject();
+  const path = join(cwd, "large-untracked.bin");
+  try {
+    writeFileSync(path, Buffer.alloc(8 * 1024 * 1024 + 1, 0x61));
+    const beforeStat = statSync(path);
+    const before = await captureRepositoryState(cwd, { authoritative: true });
+    writeFileSync(path, Buffer.alloc(8 * 1024 * 1024 + 1, 0x62));
+    utimesSync(path, beforeStat.atime, beforeStat.mtime);
+    const after = await captureRepositoryState(cwd, { authoritative: true });
+    const problems = authoritativeRepositoryProblems(before, after);
+    assert.ok(
+      problems.some((problem) => problem.code === "untracked-content-changed"),
+      JSON.stringify({ before: before.untracked, after: after.untracked, problems }),
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("runner cancellation classifies started and remaining proof commands as infrastructure trouble", async () => {
   const contract = validContract({ commands: {
     proof: { run: "node -e \"setInterval(() => {}, 1000)\"", timeoutMs: 10000, adapter: "exit-code" },
@@ -148,6 +193,7 @@ test("authoritative mode covers Git-root siblings, initial tracked dirtiness, an
   const dirtyRun = await runDogfood({ cwd: dirty, policy: ".dogfood/policy.yaml" });
   assert.equal(dirtyRun.report.verdict, "FAIL");
   assert.ok(dirtyRun.report.hardFails.some((problem) => problem.message.includes("started with tracked changes")));
+  assert.ok(dirtyRun.report.hardFails.some((problem) => problem.kind === "mutation" && problem.code === "initial-tracked-dirty"));
 
   const ignoredContract = validContract({ commands: { proof: { run: "node -e \"require('fs').writeFileSync('ignored.txt','ignored output')\"", timeoutMs: 5000, adapter: "exit-code" } } });
   const ignored = createProject(ignoredContract, { ".gitignore": "ignored.txt\n" });
@@ -155,6 +201,136 @@ test("authoritative mode covers Git-root siblings, initial tracked dirtiness, an
   const ignoredRun = await runDogfood({ cwd: ignored, policy: ".dogfood/policy.yaml" });
   assert.equal(ignoredRun.report.verdict, "PASS", JSON.stringify(ignoredRun.report.hardFails));
   assert.equal(ignoredRun.report.enforcement.ignoredFilesCovered, false);
+});
+
+test("every authoritative mutation problem is classified by a declared code, not by its prose", () => {
+  const snapshot = (overrides = {}) => ({
+    available: true,
+    trackedDirty: false,
+    head: "0000000000000000000000000000000000000000",
+    diffDigest: "digest",
+    untracked: {},
+    ...overrides,
+  });
+
+  const changed = authoritativeRepositoryProblems(
+    snapshot({
+      trackedDirty: true,
+      untracked: { "gone.txt": { digest: "2" }, "kept.txt": { digest: "1" }, "same.txt": { digest: "3" } },
+    }),
+    snapshot({
+      trackedDirty: true,
+      diffDigest: "other",
+      untracked: { "kept.txt": { digest: "9" }, "made.txt": { digest: "4" }, "same.txt": { digest: "3" } },
+    }),
+  );
+  assert.deepEqual(changed.map((problem) => problem.code), [
+    "initial-tracked-dirty",
+    "tracked-state-changed",
+    "untracked-removed",
+    "untracked-content-changed",
+    "untracked-created",
+  ]);
+  assert.equal(changed[0].message, "authoritative proof started with tracked changes anywhere in the Git repository");
+  assert.equal(changed[1].message, "tracked repository state changed during authoritative verification");
+  assert.equal(changed[2].message, "non-ignored untracked file removed during authoritative verification: gone.txt");
+  assert.equal(changed[3].message, "non-ignored untracked file content-changed during authoritative verification: kept.txt");
+  assert.equal(changed[4].message, "non-ignored untracked file created during authoritative verification: made.txt");
+
+  // The allowlist suppresses the whole problem, not merely its message.
+  assert.deepEqual(
+    authoritativeRepositoryProblems(
+      snapshot(),
+      snapshot({ untracked: { "artifacts/dogfood/run/summary.json": { digest: "1" } } }),
+      ["artifacts/dogfood/**"],
+    ),
+    [],
+  );
+
+  assert.deepEqual(
+    authoritativeInitialProblems(
+      snapshot({ trackedDirty: true, untracked: { "artifacts/dogfood/run/x": { digest: "2" }, "stray.txt": { digest: "1" } } }),
+      ["artifacts/dogfood/**"],
+    ),
+    [
+      { code: "initial-tracked-dirty", message: "authoritative proof started with tracked changes anywhere in the Git repository" },
+      { code: "initial-untracked-outside-allowlist", message: "authoritative proof started with a non-ignored untracked file outside the allowlist: stray.txt" },
+    ],
+  );
+
+  const produced = new Set([...changed, ...authoritativeInitialProblems(snapshot({ trackedDirty: true, untracked: { "stray.txt": { digest: "1" } } }))].map((problem) => problem.code));
+  assert.deepEqual([...produced].sort(), [...MUTATION_PROBLEM_CODES].sort());
+});
+
+test("mutation problems carry stable codes that separate an already-dirty repository from a mutating command", async () => {
+  const mutatingContract = validContract({ commands: { proof: { run: "node -e \"require('fs').writeFileSync('tracked.txt','after')\"", timeoutMs: 5000, adapter: "exit-code" } } });
+  const mutating = createProject(mutatingContract, { "tracked.txt": "before" });
+  installPolicy(mutating, authoritativePolicy());
+  const mutatingRun = await runDogfood({ cwd: mutating, policy: ".dogfood/policy.yaml" });
+  const mutatingProof = mutatingRun.report.commands.find((command) => command.name === "proof");
+  assert.equal(mutatingRun.report.verdict, "FAIL");
+  assert.equal(mutatingProof.mutationDetected, true);
+  assert.deepEqual(mutatingProof.mutationProblems, [{
+    code: "tracked-state-changed",
+    message: "tracked repository state changed during authoritative verification",
+  }]);
+  assert.ok(mutatingRun.report.hardFails.some((problem) => problem.kind === "mutation" && problem.code === "tracked-state-changed"));
+  assert.ok(mutatingRun.report.hardFails.every((problem) => problem.code !== "initial-tracked-dirty"));
+
+  // The repository was dirty before anything ran, so the run fails — but no command wrote
+  // anything, and charging each command with the pre-existing dirtiness would be a false accusation.
+  const dirty = createProject();
+  installPolicy(dirty, authoritativePolicy());
+  writeFileSync(join(dirty, "check.mjs"), "console.log('dirty but passing');\n");
+  const dirtyRun = await runDogfood({ cwd: dirty, policy: ".dogfood/policy.yaml" });
+  const dirtyProof = dirtyRun.report.commands.find((command) => command.name === "proof");
+  assert.equal(dirtyRun.report.verdict, "FAIL");
+  assert.equal(dirtyProof.status, "pass");
+  assert.equal(dirtyProof.mutationDetected, false);
+  assert.deepEqual(dirtyProof.mutationProblems, [{
+    code: "initial-tracked-dirty",
+    message: "authoritative proof started with tracked changes anywhere in the Git repository",
+  }]);
+  assert.deepEqual(
+    dirtyRun.report.hardFails.map((problem) => problem.code),
+    ["initial-tracked-dirty"],
+    JSON.stringify(dirtyRun.report.hardFails),
+  );
+  assert.ok(dirtyRun.report.commands.every((command) => command.mutationDetected === false));
+});
+
+test("a rejected --evidence receipt is reported as an input failure and validate mode never collects one", async () => {
+  const contract = validContract();
+  contract.oracles.review = { kind: "advisory" };
+  contract.acceptanceCriteria.push({ id: "AC-usability", class: "judgmental", oracle: "review", severity: "minor" });
+  const cwd = createProject(contract, {
+    "reviews/receipt.json": JSON.stringify({
+      version: 1,
+      acId: "AC-never-declared",
+      actor: "human reviewer",
+      driver: "browser-review",
+      assessment: "satisfied",
+      summary: "points at a criterion this contract does not declare",
+      artifacts: [],
+    }),
+  });
+
+  const { report } = await runDogfood({ cwd, evidence: ["reviews/receipt.json"] });
+  assert.equal(report.verdict, "FAIL");
+  assert.deepEqual(report.hardFails.map((problem) => problem.kind), ["advisory-input"], JSON.stringify(report.hardFails));
+  assert.ok(report.hardFails[0].message.startsWith("--evidence input rejected: "));
+  assert.ok(report.hardFails[0].message.includes("AC-never-declared"));
+  assert.equal(report.advisoryEvidence.length, 0);
+  assert.ok(report.nextSteps.some((step) => step.includes("--evidence")));
+  // The receipt argument is what failed; the proof itself still ran and passed.
+  assert.ok(report.acceptanceCriteria.find((criterion) => criterion.id === "AC-proof").verdict === "pass");
+
+  // Validate mode expresses only the validation verdict, so it must not collect a blocking
+  // problem it has no way to report; VALID with a non-empty hardFails array is not a state.
+  const validated = await runDogfood({ cwd, validateOnly: true, evidence: ["reviews/receipt.json"] });
+  assert.equal(validated.report.verdict, "VALID");
+  assert.deepEqual(validated.report.hardFails, []);
+  assert.deepEqual(validated.report.advisoryEvidence, []);
 });
 
 function installPolicy(cwd, policy) {

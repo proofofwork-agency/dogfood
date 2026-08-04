@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { runDogfood } from "../src/run.mjs";
@@ -7,15 +7,30 @@ import { verifyBundle } from "../src/verify.mjs";
 import { stringify as stringifyYaml } from "yaml";
 import { authoritativePolicy, createProject, git, validContract } from "./helpers.mjs";
 
-test("verifies a complete v3 bundle and requires its declared subject", async () => {
+test("verifies a complete v1 bundle and requires its declared subject", async () => {
   const contract = validContract({ build: { requireIdentity: true, subject: { path: "dist/app.bin", algorithm: "sha256" } } });
   const cwd = createProject(contract, { "dist/app.bin": "build-subject\n" });
   const { artifactDir } = await runDogfood({ cwd });
   assert.equal(verifyBundle(artifactDir).ok, false);
   const verified = verifyBundle(artifactDir, { subject: "dist/app.bin", cwd });
   assert.equal(verified.ok, true, verified.errors.join("\n"));
+  assert.equal(verified.verdict, "INTACT");
+  assert.equal(verified.verificationLevel, "integrity");
   writeFileSync(join(cwd, "dist", "wrong.bin"), "wrong\n");
   assert.equal(verifyBundle(artifactDir, { subject: "dist/wrong.bin", cwd }).ok, false);
+});
+
+test("rejects a manifest symlink before reading it", { skip: process.platform === "win32" }, async () => {
+  const cwd = createProject();
+  const { artifactDir } = await runDogfood({ cwd });
+  const manifest = join(artifactDir, "manifest.json");
+  const outside = join(cwd, "outside-manifest.json");
+  writeFileSync(outside, readFileSync(manifest));
+  rmSync(manifest);
+  symlinkSync(outside, manifest);
+  const result = verifyBundle(artifactDir);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes("manifest.json is not a regular file"), result.errors.join("\n"));
 });
 
 test("detects altered, missing, and unrecorded bundle files", async () => {
@@ -31,6 +46,82 @@ test("detects altered, missing, and unrecorded bundle files", async () => {
   const third = await runDogfood({ cwd });
   writeFileSync(join(third.artifactDir, "extra.txt"), "extra\n");
   assert.ok(verifyBundle(third.artifactDir).errors.some((error) => error.includes("unrecorded")));
+});
+
+test("temp-named files are never exempt from the unrecorded-file check", async () => {
+  const cwd = createProject();
+  const { artifactDir } = await runDogfood({ cwd });
+  assert.equal(verifyBundle(artifactDir).ok, true);
+  mkdirSync(join(artifactDir, "evidence", ".tmp-x"), { recursive: true });
+  writeFileSync(join(artifactDir, "evidence", ".tmp-x", "payload.json"), "{}\n");
+  writeFileSync(join(artifactDir, "summary.json.tmp-1-abc"), "{}\n");
+  const { errors } = verifyBundle(artifactDir);
+  assert.ok(errors.includes("unrecorded file is present in bundle: evidence/.tmp-x/payload.json"), errors.join("\n"));
+  assert.ok(errors.includes("unrecorded file is present in bundle: summary.json.tmp-1-abc"), errors.join("\n"));
+});
+
+test("names that collapse onto a recorded file under realpath are still unrecorded", { skip: process.platform === "win32" }, async () => {
+  const cwd = createProject();
+  const { artifactDir } = await runDogfood({ cwd });
+  assert.equal(verifyBundle(artifactDir).ok, true);
+  // Each of these re-derived to an already-recorded name, so the sweep stayed silent.
+  const planted = ["\\summary.json", ".\\junit.xml", "summary.json ", "matrix.json\t"];
+  for (const name of planted) writeFileSync(join(artifactDir, name), "PAYLOAD\n");
+  writeFileSync(join(artifactDir, "commands", "proof", "stdout.log\\"), "PAYLOAD\n");
+  const { ok, errors } = verifyBundle(artifactDir);
+  assert.equal(ok, false);
+  for (const name of [...planted, "commands/proof/stdout.log\\"]) {
+    assert.ok(errors.includes(`unrecorded file is present in bundle: ${name}`), `${name}: ${errors.join("\n")}`);
+  }
+});
+
+test("an empty directory planted in a bundle is not invisible", async () => {
+  const cwd = createProject();
+  const { artifactDir } = await runDogfood({ cwd });
+  assert.equal(verifyBundle(artifactDir).ok, true);
+  mkdirSync(join(artifactDir, "ghost-dir", "nested-empty"), { recursive: true });
+  const { ok, errors } = verifyBundle(artifactDir);
+  assert.equal(ok, false);
+  assert.ok(errors.includes("unrecorded directory is present in bundle: ghost-dir/nested-empty"), errors.join("\n"));
+});
+
+test("a hardlinked bundle file warns without failing a legitimately archived bundle", async () => {
+  const cwd = createProject();
+  const { artifactDir } = await runDogfood({ cwd });
+  // Hardlink-based copy and backup tools produce this on untouched bundles, so it cannot be an error.
+  const twin = join(cwd, "twin.json");
+  linkSync(join(artifactDir, "summary.json"), twin);
+  const result = verifyBundle(artifactDir);
+  assert.equal(result.ok, true, result.errors.join("\n"));
+  assert.ok(result.warnings.some((warning) => warning.includes("second hard link") && warning.includes("summary.json")), result.warnings.join("\n"));
+  rmSync(twin);
+});
+
+test("an unreadable bundle subdirectory returns a verdict instead of crashing", { skip: process.platform === "win32" || process.getuid?.() === 0 }, async () => {
+  const cwd = createProject();
+  const { artifactDir } = await runDogfood({ cwd });
+  const locked = join(artifactDir, "locked");
+  mkdirSync(locked);
+  writeFileSync(join(locked, "x.txt"), "x\n");
+  chmodSync(locked, 0o000);
+  try {
+    const result = verifyBundle(artifactDir);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some((error) => error.startsWith("bundle contents could not be enumerated:")), result.errors.join("\n"));
+  } finally {
+    chmodSync(locked, 0o700);
+  }
+});
+
+test("detects a symlink planted inside a bundle", { skip: process.platform === "win32" }, async () => {
+  const cwd = createProject();
+  const { artifactDir } = await runDogfood({ cwd });
+  assert.equal(verifyBundle(artifactDir).ok, true);
+  mkdirSync(join(artifactDir, "evidence"), { recursive: true });
+  symlinkSync(join(cwd, "check.mjs"), join(artifactDir, "evidence", "leak.mjs"));
+  const result = verifyBundle(artifactDir);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.startsWith("bundle contains a non-regular file:")), result.errors.join("\n"));
 });
 
 test("detects source, normalized snapshot, policy, and report cross-check tampering", async () => {
@@ -50,14 +141,17 @@ test("detects source, normalized snapshot, policy, and report cross-check tamper
   assert.equal(verifyBundle(policyRun.artifactDir).ok, false);
 });
 
-test("rejects v2 bundles with rerun guidance", () => {
+test("rejects a manifest whose version this build does not produce", () => {
   const cwd = createProject();
-  const bundle = join(cwd, "v2-bundle");
-  mkdirSync(bundle);
-  writeFileSync(join(bundle, "manifest.json"), JSON.stringify({ version: 2 }));
-  const result = verifyBundle(bundle);
-  assert.equal(result.ok, false);
-  assert.match(result.errors[0], /rerun with Dogfood v0\.3/);
+  // Nothing before v1 was ever released, so there is no legacy format to accept — only this one.
+  for (const version of [0, 2, 99]) {
+    const bundle = join(cwd, `v${version}-bundle`);
+    mkdirSync(bundle);
+    writeFileSync(join(bundle, "manifest.json"), JSON.stringify({ version }));
+    const result = verifyBundle(bundle);
+    assert.equal(result.ok, false, `v${version} must not verify`);
+    assert.match(result.errors[0], /unsupported manifest version/);
+  }
 });
 
 test("exclusive run ids prevent overwrite and concurrent reuse", async () => {

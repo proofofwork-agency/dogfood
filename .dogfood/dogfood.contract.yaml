@@ -1,6 +1,6 @@
-version: 2
+version: 1
 project: dogfood
-description: Dogfood v0.3 proves its own runner, browser adapter, nested self-run, and package contents.
+description: Dogfood 0.4 proves its own runner, browser adapter, nested self-run, and package contents.
 
 build:
   requireIdentity: true
@@ -19,7 +19,7 @@ commands:
     timeoutMs: 120000
     adapter: exit-code
   package-dry-run:
-    run: npm pack --dry-run --json
+    run: node scripts/check-package-contents.mjs
     timeoutMs: 120000
     adapter: exit-code
 
@@ -57,7 +57,7 @@ acceptanceCriteria:
     oracle: nested-run
     severity: major
   - id: AC-package-dry-run
-    text: The private package can be assembled without publishing it.
+    text: The published file list contains every runtime directory and no test, artifact, script, or credential paths.
     class: deterministic
     oracle: package-contents
     severity: major

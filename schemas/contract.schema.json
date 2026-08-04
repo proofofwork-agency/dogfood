@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://proofofwork.agency/schemas/dogfood-contract-v2.json",
-  "title": "Dogfood contract v2",
+  "$id": "https://proofofwork.agency/schemas/dogfood-contract-v1.json",
+  "title": "Dogfood contract v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -15,7 +15,7 @@
   "properties": {
     "version": {
       "type": "integer",
-      "const": 2
+      "const": 1
     },
     "project": {
       "type": "string",
@@ -120,9 +120,37 @@
         },
         "adapter": {
           "type": "string",
-          "enum": ["exit-code", "playwright-json"]
+          "enum": ["exit-code", "playwright-json", "junit-xml"]
+        },
+        "reportPath": {
+          "$ref": "#/$defs/workspacePath",
+          "description": "Where a junit-xml command writes its JUnit report, relative to the working directory."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "adapter": { "const": "junit-xml" } },
+            "required": ["adapter"]
+          },
+          "then": {
+            "required": ["reportPath"],
+            "properties": { "reportPath": { "$ref": "#/$defs/workspacePath" } }
+          },
+          "else": {
+            "not": {
+              "required": ["reportPath"],
+              "properties": { "reportPath": { "$ref": "#/$defs/workspacePath" } }
+            }
+          }
+        }
+      ]
+    },
+    "workspacePath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Relative path that stays inside the working directory: no absolute paths, no drive letters, no parent traversal.",
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[^\\u0000]+$"
     },
     "oracle": {
       "oneOf": [
@@ -153,6 +181,34 @@
             "tag": {
               "type": "string",
               "pattern": "^@dogfood:[A-Za-z0-9][A-Za-z0-9._-]*$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "command", "testcase"],
+          "properties": {
+            "kind": {
+              "const": "junit"
+            },
+            "command": {
+              "$ref": "#/$defs/name"
+            },
+            "testcase": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "classname": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
           }
         },
@@ -198,7 +254,7 @@
         "severity": {
           "type": "string",
           "enum": ["blocker", "major", "minor"],
-          "description": "Classification metadata. All deterministic criteria block regardless of severity in v2."
+          "description": "Classification metadata. All deterministic criteria block regardless of severity in v1."
         }
       },
       "allOf": [

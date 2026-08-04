@@ -1,8 +1,21 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { atomicWriteFile, atomicWriteJson, isPathInside } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson, isPathInside, safeSegment } from "./files.mjs";
 import { validateAdvisoryReceipt } from "./validate.mjs";
 
+const MAX_RECEIPT_BYTES = 1024 * 1024;
+const MAX_ADVISORY_ARTIFACT_BYTES = 25 * 1024 * 1024;
+const MAX_ADVISORY_TOTAL_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Copies advisory receipts into the bundle.
+ *
+ * Every returned error describes a rejected `--evidence` argument — unreadable, malformed, or
+ * pointed at a criterion the contract does not declare. None of them is an assessment. An
+ * assessment ("satisfied", "concern") is scored in score-ac.mjs and can never move the hard
+ * verdict; a receipt the runner could not even read is a usage failure and is never dropped,
+ * because silently ignoring it would publish a bundle claiming evidence it does not contain.
+ */
 export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = [] }) {
   const receipts = [];
   const errors = [];
@@ -10,6 +23,7 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
   const knownCriteria = new Set(criteria.map((criterion) => criterion.id));
   const destination = join(artifactDir, "evidence", "advisory");
   mkdirSync(destination, { recursive: true });
+  let copiedBytes = 0;
 
   for (const [index, input] of paths.entries()) {
     const label = `evidence[${index}]`;
@@ -23,6 +37,11 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
 
     let receipt;
     try {
+      const stat = statSync(receiptPath);
+      if (!stat.isFile()) throw new Error("receipt is not a regular file");
+      if (stat.size > MAX_RECEIPT_BYTES) {
+        throw new Error(`receipt exceeds the ${MAX_RECEIPT_BYTES / 1024 / 1024} MiB limit`);
+      }
       receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
     } catch (error) {
       errors.push(`${label}: could not read JSON receipt: ${error.message}`);
@@ -45,9 +64,17 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
       let source;
       try {
         source = safeWorkspacePath(artifact, workspace, cwd);
-        if (!existsSync(source) || !statSync(source).isFile()) {
+        const stat = statSync(source);
+        if (!existsSync(source) || !stat.isFile()) {
           throw new Error(`artifact is not a file: ${artifact}`);
         }
+        if (stat.size > MAX_ADVISORY_ARTIFACT_BYTES) {
+          throw new Error(`artifact exceeds the ${MAX_ADVISORY_ARTIFACT_BYTES / 1024 / 1024} MiB per-file limit: ${artifact}`);
+        }
+        if (copiedBytes + stat.size > MAX_ADVISORY_TOTAL_BYTES) {
+          throw new Error(`advisory artifacts exceed the ${MAX_ADVISORY_TOTAL_BYTES / 1024 / 1024} MiB total limit`);
+        }
+        copiedBytes += stat.size;
       } catch (error) {
         errors.push(`${label}.artifacts[${artifactIndex}]: ${error.message}`);
         artifactError = true;
@@ -56,7 +83,7 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
       const relativeDestination = join(
         "artifacts",
         String(index + 1),
-        `${artifactIndex + 1}-${basename(source)}`,
+        `${artifactIndex + 1}-${safeSegment(basename(source))}`,
       );
       const target = join(destination, relativeDestination);
       mkdirSync(dirname(target), { recursive: true });
@@ -77,6 +104,8 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
 
   return { receipts, errors };
 }
+
+// A copied basename becomes a bundle path, so it may not carry separators or non-portable bytes.
 
 function safeWorkspacePath(input, workspace, cwd) {
   const candidate = isAbsolute(input) ? input : resolve(cwd, input);

@@ -8,64 +8,90 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify as stringifyYaml } from "yaml";
 import { collectAdvisoryEvidence } from "./advisory.mjs";
+import { sha256 } from "./hash.mjs";
+import { loadPrivateKey, signingBlock, signManifest } from "./sign.mjs";
 import { compareBaseline } from "./baseline.mjs";
 import { collectRuntimeMetadata, inspectBuildSubject } from "./build.mjs";
 import { atomicWriteFile, atomicWriteJson, portableRelative } from "./files.mjs";
-import { findContractPath, loadContractDocument } from "./load-contract.mjs";
+import { findContractPath, loadContractDocument, parseYaml } from "./load-contract.mjs";
 import { defaultPolicyPath, loadPolicyDocument, validateAuthoritativePolicy, validateProtectedPaths } from "./policy.mjs";
+import { createDocumentRedactor, DEFAULT_LOG_POLICY, redactDeep } from "./redact.mjs";
 import { buildReport, writeManifest, writeReport } from "./report.mjs";
 import {
   authoritativeInitialProblems,
   authoritativeRepositoryProblems,
   captureRepositoryState,
+  resetUntrackedDigestCache,
   repositoryStateChanged,
+  summarizeRepository,
 } from "./repository.mjs";
 import { runNamedCommands } from "./run-commands.mjs";
-import { collectCommandsToRun, expectedPlaywrightTags, scoreAcceptanceCriteria } from "./score-ac.mjs";
+import { collectCommandsToRun, expectedJunitCases, expectedPlaywrightTags, scoreAcceptanceCriteria } from "./score-ac.mjs";
 import { validateContract } from "./validate.mjs";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 export const PACKAGE_ROOT = resolve(moduleDir, "..");
 const packageInfo = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"));
 
+// Ordinary, expected setup refusals; they are not internal runner faults.
+export class RunSetupError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RunSetupError";
+  }
+}
+
 export async function runDogfood(options = {}) {
   const cwd = resolve(options.cwd || process.cwd());
+  resetUntrackedDigestCache();
   const startedAt = new Date().toISOString();
   const runId = options.runId || `dogfood-${startedAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) throw new Error(`Invalid run id: ${runId}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) throw new RunSetupError(`Invalid run id: ${runId}`);
 
   const contractPath = findContractPath(cwd, options.contract);
   const { contract, raw: contractRaw } = loadContractDocument(contractPath);
   const policyDocument = loadPolicyDocument(cwd, options.policy);
+  // A policy is never auto-discovered; silently flipping the profile would silently flip verdicts.
+  const ignoredPolicy = !options.policy && existsSync(resolve(cwd, defaultPolicyPath()));
   const authoritative = Boolean(policyDocument.path);
   const validateOnly = Boolean(options.validateOnly);
+  const signingKey = options.sign ? loadPrivateKey(resolve(cwd, options.sign)) : null;
   const artifactRoot = resolve(cwd, options.artifactDir || "artifacts/dogfood");
   const artifactDir = join(artifactRoot, runId);
   mkdirSync(artifactRoot, { recursive: true });
   try {
     mkdirSync(artifactDir);
   } catch (error) {
-    if (error.code === "EEXIST") throw new Error(`Run directory already exists; refusing to overwrite: ${artifactDir}`);
+    if (error.code === "EEXIST") throw new RunSetupError(`Run directory already exists; refusing to overwrite: ${artifactDir}`);
     throw error;
   }
 
-  const normalizedContract = stringifyYaml(contract, { lineWidth: 0 });
-  atomicWriteFile(join(artifactDir, "contract.original.yaml"), contractRaw, "utf8");
+  // Declaring a string in logs.redactLiterals means "this is a secret", so the copies published
+  // in the bundle mask it too. With no declared literals every published byte is unchanged.
+  const documentRedactor = createDocumentRedactor(policyDocument.policy?.logs || DEFAULT_LOG_POLICY);
+  const publishedContract = documentRedactor.apply(contractRaw);
+  const normalizedContract = stringifyYaml(parseYaml(publishedContract), { lineWidth: 0 });
+  atomicWriteFile(join(artifactDir, "contract.original.yaml"), publishedContract, "utf8");
   atomicWriteFile(join(artifactDir, "contract.snapshot.yaml"), normalizedContract, "utf8");
   let normalizedPolicy = null;
+  let publishedPolicy = null;
   if (authoritative) {
-    normalizedPolicy = stringifyYaml(policyDocument.policy, { lineWidth: 0 });
-    atomicWriteFile(join(artifactDir, "policy.original.yaml"), policyDocument.raw, "utf8");
+    publishedPolicy = documentRedactor.apply(policyDocument.raw);
+    normalizedPolicy = stringifyYaml(parseYaml(publishedPolicy), { lineWidth: 0 });
+    atomicWriteFile(join(artifactDir, "policy.original.yaml"), publishedPolicy, "utf8");
     atomicWriteFile(join(artifactDir, "policy.snapshot.yaml"), normalizedPolicy, "utf8");
   }
 
   const digests = {
-    sourceContract: sha256(contractRaw),
+    sourceContract: sha256(publishedContract),
     normalizedContract: sha256(normalizedContract),
-    sourcePolicy: authoritative ? sha256(policyDocument.raw) : null,
+    sourcePolicy: authoritative ? sha256(publishedPolicy) : null,
     normalizedPolicy: authoritative ? sha256(normalizedPolicy) : null,
   };
   const validation = validateContract(contract);
+  if (ignoredPolicy) {
+    validation.warnings.push(`a policy exists at ${defaultPolicyPath()} but --policy was not supplied; this run used the standard profile`);
+  }
   if (!policyDocument.validation.ok) validation.errors.push(...policyDocument.validation.errors);
   if (authoritative && policyDocument.validation.ok) {
     validation.errors.push(...validateProtectedPaths(cwd, { contract: contractPath, policy: policyDocument.path }).errors);
@@ -78,7 +104,7 @@ export async function runDogfood(options = {}) {
   if (options.baselineRef) {
     if (!authoritative || !policyDocument.validation.ok) {
       validation.errors.push("--baseline-ref requires a valid authoritative --policy");
-    } else if (contract && typeof contract === "object" && contract.version === 2) {
+    } else if (contract && typeof contract === "object" && contract.version === 1) {
       baseline = compareBaseline({
         cwd,
         contractPath,
@@ -102,8 +128,8 @@ export async function runDogfood(options = {}) {
     runtimeProblems.push({ kind: "infra", category: "infrastructure", message: `Git repository state is unavailable: ${repositoryBefore.error}` });
   }
   if (authoritative && repositoryBefore?.available) {
-    for (const message of authoritativeInitialProblems(repositoryBefore, policyDocument.policy.mutation.allowUntracked)) {
-      runtimeProblems.push({ kind: "mutation", category: "product", message });
+    for (const problem of authoritativeInitialProblems(repositoryBefore, policyDocument.policy.mutation.allowUntracked)) {
+      runtimeProblems.push({ kind: "mutation", code: problem.code, category: "product", message: problem.message });
     }
   }
 
@@ -113,7 +139,7 @@ export async function runDogfood(options = {}) {
     timeoutMs: options.timeoutMs,
     authoritative,
     allowUntracked: policyDocument.policy?.mutation?.allowUntracked || [],
-    logs: policyDocument.policy?.logs || null,
+    logs: policyDocument.policy?.logs || DEFAULT_LOG_POLICY,
     signal: options.signal,
   };
   let commandResults = [];
@@ -135,6 +161,7 @@ export async function runDogfood(options = {}) {
       identityResult.blocking = Boolean(contract?.build?.requireIdentity) || identityResult.mutationDetected;
       commandResults.push(identityResult);
       if (identityResult.mutationDetected) {
+        // The command's own mutationProblems carry the codes; this entry only names the culprit.
         runtimeProblems.push({ kind: "mutation", category: "product", message: "build identity command changed repository state" });
       }
       if (contract?.build?.requireIdentity && identityResult.status !== "pass") {
@@ -151,18 +178,30 @@ export async function runDogfood(options = {}) {
     }
   }
 
+  // An advisory assessment never moves the verdict, but a malformed --evidence argument is a
+  // usage failure and is never silently dropped. Validate mode executes nothing and expresses
+  // only the validation verdict, so it must not be able to collect a blocking problem it cannot
+  // report: the CLI already refuses --evidence there, and this gate closes the exported API too.
   let advisoryReceipts = [];
-  if (validation.ok && (options.evidence || []).length > 0) {
+  if (validation.ok && !validateOnly && (options.evidence || []).length > 0) {
     const advisory = collectAdvisoryEvidence(options.evidence, { cwd, artifactDir, criteria: contract.acceptanceCriteria });
     advisoryReceipts = advisory.receipts;
-    runtimeProblems.push(...advisory.errors.map((message) => ({ kind: "advisory-evidence", category: "product", message })));
+    runtimeProblems.push(...advisory.errors.map((message) => ({
+      kind: "advisory-input",
+      category: "product",
+      message: `--evidence input rejected: ${message}`,
+    })));
   }
 
   if (validation.ok && !validateOnly) {
     const proofResults = await runNamedCommands(
       collectCommandsToRun(contract),
       contract.commands,
-      { ...runOptions, expectedTagsByCommand: expectedPlaywrightTags(contract) },
+      {
+        ...runOptions,
+        expectedTagsByCommand: expectedPlaywrightTags(contract),
+        expectedCasesByCommand: expectedJunitCases(contract),
+      },
     );
     commandResults.push(...proofResults);
   }
@@ -189,10 +228,12 @@ export async function runDogfood(options = {}) {
   if (repositoryBefore?.available && repositoryAfter?.available) {
     const changes = authoritative
       ? authoritativeRepositoryProblems(repositoryBefore, repositoryAfter, policyDocument.policy.mutation.allowUntracked)
-      : repositoryStateChanged(repositoryBefore, repositoryAfter) ? ["tracked repository state changed during verification"] : [];
-    for (const message of changes) {
-      if (runtimeProblems.some((problem) => problem.kind === "mutation" && problem.message === message)) continue;
-      runtimeProblems.push({ kind: "mutation", category: "product", message });
+      : repositoryStateChanged(repositoryBefore, repositoryAfter)
+        ? [{ code: "tracked-state-changed", message: "tracked repository state changed during verification" }]
+        : [];
+    for (const change of changes) {
+      if (runtimeProblems.some((problem) => problem.kind === "mutation" && problem.message === change.message)) continue;
+      runtimeProblems.push({ kind: "mutation", code: change.code, category: "product", message: change.message });
     }
   }
 
@@ -212,14 +253,15 @@ export async function runDogfood(options = {}) {
     acResults,
     advisoryReceipts,
     runtimeProblems,
-    repositoryBefore: summarizeRepository(repositoryBefore),
-    repositoryAfter: summarizeRepository(repositoryAfter),
+    repositoryBefore: summarizeRepository(repositoryBefore, { cwd }),
+    repositoryAfter: summarizeRepository(repositoryAfter, { cwd }),
     validateOnly,
     authoritative,
     policyPath: policyDocument.path,
     baseline,
     metadata,
     digests,
+    documentRedactor,
   });
   writeReport(artifactDir, report);
   const manifest = writeManifest(artifactDir, {
@@ -244,24 +286,43 @@ export async function runDogfood(options = {}) {
     repository: report.repository,
     packageInfo: { name: packageInfo.name, version: packageInfo.version },
     build: { definition: contract?.build || null, identity: buildIdentity, subject: subjectInspection.subject },
-    commandDefinitions: contract?.commands || {},
+    commandDefinitions: redactDeep(contract?.commands || {}, documentRedactor),
     baseline,
     metadata,
     startedAt,
     finishedAt,
+    signing: signingKey ? signingBlock(signingKey) : null,
   });
 
-  atomicWriteJson(join(artifactRoot, "latest.json"), {
-    version: 3,
+  // The signature is detached because it cannot live inside the bytes it signs.
+  if (signingKey) signManifest(artifactDir, signingKey);
+
+  // A validate bundle keeps its own pointer so it can never stand in for the proof.
+  writeLatestPointer(join(artifactRoot, report.mode === "run" ? "latest.json" : "latest-validate.json"), {
+    version: 1,
     runId,
     path: runId,
     summary: `${runId}/summary.md`,
     manifest: `${runId}/manifest.json`,
+    mode: report.mode,
     verdict: report.verdict,
     validationVerdict: report.validationVerdict,
     proofVerdict: report.proofVerdict,
+    startedAt,
+    finishedAt,
   });
   return { report, manifest, artifactDir, contractPath, policyPath: policyDocument.path, cwd };
+}
+
+/** Concurrent runs finish out of order, so the pointer follows start time, not completion time. */
+function writeLatestPointer(path, pointer) {
+  try {
+    const current = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof current.startedAt === "string" && current.startedAt > pointer.startedAt) return;
+  } catch {
+    // No readable pointer yet, so this run owns it.
+  }
+  atomicWriteJson(path, pointer);
 }
 
 export function exitCodeForVerdict(verdict) {
@@ -290,8 +351,8 @@ export async function initProject(cwd, { force = false, authoritative = false } 
   writeTemplate(join(dogfoodDir, "README.md"), [
     "# Dogfood project gate",
     "",
-    "This directory contains a portable Dogfood v2 proof contract.",
-    authoritative ? "The explicit policy enables the authoritative v0.3 profile." : "No policy is installed, so standard compatibility mode is active.",
+    "This directory contains a portable Dogfood v1 proof contract.",
+    authoritative ? "The explicit policy enables the authoritative profile." : "No policy is installed, so standard compatibility mode is active.",
     "",
     "1. Replace the placeholder command.",
     "2. Declare an oracle for every in-scope acceptance criterion.",
@@ -330,25 +391,4 @@ function invalidAcceptanceCriteria(contract) {
   }));
 }
 
-function summarizeRepository(repository) {
-  if (!repository) return null;
-  return {
-    available: repository.available,
-    root: repository.root ? portableRelative(repository.root, repository.root) : null,
-    scope: repository.scope,
-    authoritative: repository.authoritative,
-    head: repository.head,
-    dirty: repository.dirty,
-    trackedDirty: repository.trackedDirty,
-    dirtyStateDigest: repository.dirtyStateDigest,
-    trackedStateDigest: repository.trackedStateDigest,
-    diffDigest: repository.diffDigest,
-    untracked: repository.untracked,
-    ignoredFilesCovered: false,
-    error: repository.error,
-  };
-}
-
-function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 export function portablePath(from, to) { return portableRelative(from, to); }
-export { defaultPolicyPath };

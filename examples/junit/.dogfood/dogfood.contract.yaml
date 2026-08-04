@@ -1,0 +1,46 @@
+version: 1
+project: dogfood-junit-example
+description: Binds acceptance criteria to named testcases in a JUnit XML report
+
+build:
+  requireIdentity: false
+
+commands:
+  suite:
+    run: node checks/suite.mjs reports/junit.xml
+    timeoutMs: 120000
+    adapter: junit-xml
+    # Where the runner writes its report, relative to the working directory. Dogfood clears this
+    # path before the command runs, so a report present afterwards was produced by this command.
+    reportPath: reports/junit.xml
+
+gates:
+  verification: [suite]
+
+oracles:
+  # Each oracle names one testcase. classname is optional; when it is omitted the name must still
+  # identify the test, and every matching testcase has to pass.
+  expired-card:
+    kind: junit
+    command: suite
+    testcase:
+      classname: checkout
+      name: rejects an expired card
+  bulk-discount:
+    kind: junit
+    command: suite
+    testcase:
+      classname: pricing
+      name: applies the bulk discount
+
+acceptanceCriteria:
+  - id: AC-expired-card
+    text: An expired card is refused at checkout.
+    class: deterministic
+    oracle: expired-card
+    severity: blocker
+  - id: AC-bulk-discount
+    text: Orders of ten units or more receive the bulk discount.
+    class: deterministic
+    oracle: bulk-discount
+    severity: major

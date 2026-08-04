@@ -1,23 +1,28 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ContractInputError, findContractPath } from "../src/load-contract.mjs";
-import { migrateContractFile, MigrationError } from "../src/migrate.mjs";
-import { exitCodeForVerdict, initProject, PACKAGE_ROOT, runDogfood } from "../src/run.mjs";
+import { defaultPolicyPath } from "../src/policy.mjs";
+import { BundleIntegrityError } from "../src/report.mjs";
+import { exitCodeForVerdict, initProject, PACKAGE_ROOT, runDogfood, RunSetupError } from "../src/run.mjs";
+import { SigningError, writeKeyPair } from "../src/sign.mjs";
 import { verifyBundle } from "../src/verify.mjs";
 
-const COMMANDS = new Set(["help", "version", "init", "validate", "run", "verify", "report", "migrate"]);
+const COMMANDS = new Set(["help", "version", "init", "validate", "run", "verify", "report", "keygen"]);
 const OPTION_SPECS = {
-  "--cwd": { key: "cwd", value: true, commands: ["init", "validate", "run", "report", "migrate"] },
-  "--contract": { key: "contract", value: true, commands: ["validate", "run", "migrate"] },
+  "--cwd": { key: "cwd", value: true, commands: ["init", "validate", "run", "report"] },
+  "--contract": { key: "contract", value: true, commands: ["validate", "run"] },
   "--policy": { key: "policy", value: true, commands: ["validate", "run"] },
   "--baseline-ref": { key: "baselineRef", value: true, commands: ["validate", "run"] },
   "--subject": { key: "subject", value: true, commands: ["verify"] },
+  "--sign": { key: "sign", value: true, commands: ["run"] },
+  "--key": { key: "key", value: true, commands: ["verify"] },
+  "--out": { key: "out", value: true, commands: ["keygen"] },
   "--json": { key: "json", value: false, commands: ["validate", "run", "verify"] },
-  "--force": { key: "force", value: false, commands: ["init"] },
+  "--force": { key: "force", value: false, commands: ["init", "keygen"] },
   "--authoritative": { key: "authoritative", value: false, commands: ["init"] },
-  "--write": { key: "write", value: false, commands: ["migrate"] },
   "--timeout-ms": { key: "timeoutMs", value: true, commands: ["run"] },
   "--evidence": { key: "evidence", value: true, repeat: true, commands: ["run"] },
 };
@@ -50,6 +55,9 @@ export function parseArgs(argv, currentDirectory = process.cwd()) {
     write: false,
     timeoutMs: null,
     evidence: [],
+    sign: null,
+    key: null,
+    out: null,
   };
   const seen = new Set();
   while (rest.length > 0) {
@@ -91,6 +99,9 @@ export function parseArgs(argv, currentDirectory = process.cwd()) {
   }
 
   args.cwd = resolve(currentDirectory, args.cwd);
+  if (args.baselineRef !== null && args.baselineRef.startsWith("-")) {
+    throw new CliUsageError("--baseline-ref must not start with '-'");
+  }
   if (args.timeoutMs !== null) {
     const value = Number(args.timeoutMs);
     if (!Number.isSafeInteger(value) || value < 1 || value > 3600000) {
@@ -119,40 +130,40 @@ export async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (args.command === "version") {
-    const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"));
-    console.log(pkg.version);
+    console.log(packageVersion());
     return 0;
   }
 
   try {
     if (args.command === "init") {
       const result = await initProject(args.cwd, { force: args.force, authoritative: args.authoritative });
-      console.log(`Initialized Dogfood v0.3 (contract v2) in ${args.cwd}`);
+      console.log(`Initialized Dogfood v${packageVersion()} (contract v1) in ${args.cwd}`);
       console.log(`Contract: ${result.contractPath}`);
       if (result.policyPath) console.log(`Authoritative policy: ${result.policyPath}`);
       for (const skill of result.skillDests) console.log(`Agent skill: ${skill}`);
       console.log("The generated contract is intentionally incomplete; map its oracle before running.");
+      // A policy is never auto-discovered, so the next command has to carry it explicitly.
+      if (result.policyPath) console.log(`Next: dogfood run --policy ${defaultPolicyPath()}`);
       return 0;
     }
 
-    if (args.command === "migrate") {
-      const contractPath = findContractPath(args.cwd, args.contract);
-      const result = migrateContractFile(contractPath, { write: args.write });
-      if (args.write) {
-        console.log(`Migrated contract in place: ${contractPath}`);
-        console.log(`Backup: ${result.backupPath}`);
-      } else {
-        process.stdout.write(result.yaml);
-      }
-      return 0;
-    }
 
     if (args.command === "report") {
       return printLatestReport(args.cwd);
     }
 
+    if (args.command === "keygen") {
+      const target = resolve(args.cwd || process.cwd(), args.out || ".");
+      const { privatePath, publicPath, keyId } = writeKeyPair(target, { force: args.force });
+      console.log(`Private key: ${privatePath} (mode 0600 — never commit this)`);
+      console.log(`Public key:  ${publicPath}`);
+      console.log(`Key id:      ${keyId}`);
+      console.log("Distribute the public key out of band. A key read from inside a bundle proves nothing.");
+      return 0;
+    }
+
     if (args.command === "verify") {
-      const verification = verifyBundle(args.bundleDir, { subject: args.subject });
+      const verification = verifyBundle(args.bundleDir, { subject: args.subject, key: args.key });
       if (args.json) console.log(JSON.stringify(verification, null, 2));
       else printVerification(verification);
       return verification.ok ? 0 : 1;
@@ -172,6 +183,7 @@ export async function main(argv = process.argv.slice(2)) {
         validateOnly: args.command === "validate",
         timeoutMs: args.timeoutMs,
         evidence: args.evidence,
+        sign: args.sign,
         signal: abortController.signal,
       });
     } finally {
@@ -186,8 +198,21 @@ export async function main(argv = process.argv.slice(2)) {
     }
     return exitCodeForVerdict(report.verdict);
   } catch (error) {
-    if (error instanceof ContractInputError || error instanceof MigrationError) {
+    if (error instanceof ContractInputError) {
       console.error(error.message);
+      return 1;
+    }
+    if (error instanceof SigningError) {
+      console.error(error.message);
+      return 1;
+    }
+    if (error instanceof BundleIntegrityError) {
+      console.error(error.message);
+      return 2;
+    }
+    if (error instanceof RunSetupError) {
+      console.error(error.message);
+      if (process.env.DOGFOOD_DEBUG) console.error(error);
       return 1;
     }
     if (args.command === "init" && error instanceof Error) {
@@ -204,7 +229,10 @@ function printLatestReport(cwd) {
   const artifactRoot = resolve(cwd, "artifacts", "dogfood");
   const latestPath = join(artifactRoot, "latest.json");
   if (!existsSync(latestPath)) {
-    console.error("No artifacts/dogfood/latest.json — run `dogfood run` first.");
+    const validated = existsSync(join(artifactRoot, "latest-validate.json"))
+      ? " The last `dogfood validate` wrote artifacts/dogfood/latest-validate.json, which records no executed proof."
+      : "";
+    console.error(`No artifacts/dogfood/latest.json — run \`dogfood run\` first.${validated}`);
     return 1;
   }
   let latest;
@@ -218,18 +246,82 @@ function printLatestReport(cwd) {
     console.error("latest.json does not contain a portable relative run path.");
     return 1;
   }
+  // A VALID/INVALID verdict is only reachable in validate mode, so a pointer written by an
+  // older Dogfood that had no mode field is still recognised and never served as the proof.
+  if (latest.mode === "validate" || ["VALID", "INVALID"].includes(latest.verdict)) {
+    console.error(`artifacts/dogfood/latest.json points at a validate-only bundle (${latest.runId || latest.path}); no proof was executed. Run \`dogfood run\`.`);
+    return 1;
+  }
   const runDirectory = resolve(artifactRoot, latest.path);
-  if (!inside(artifactRoot, runDirectory)) {
+  const artifactRootReal = realPathOrNull(artifactRoot);
+  const runDirectoryReal = realPathOrNull(runDirectory);
+  if (!artifactRootReal || !runDirectoryReal) {
+    console.error("latest.json run path is missing or unreadable.");
+    return 1;
+  }
+  if (!inside(artifactRootReal, runDirectoryReal)) {
     console.error("latest.json run path escapes artifacts/dogfood.");
     return 1;
   }
-  const summary = join(runDirectory, "summary.md");
+  const verification = verifyBundle(runDirectoryReal, { cwd, requireSubject: false });
+  if (!verification.ok) {
+    console.error("Latest bundle failed integrity verification:");
+    for (const error of verification.errors) console.error(`  - ${error}`);
+    return 1;
+  }
+  let report;
+  try {
+    report = JSON.parse(readFileSync(join(runDirectoryReal, "summary.json"), "utf8"));
+  } catch (error) {
+    console.error(`Latest summary metadata is unreadable: ${error.message}`);
+    return 1;
+  }
+  if (report.mode !== "run") {
+    console.error(`latest.json points at a ${report.mode || "non-run"} bundle; no proof was executed.`);
+    return 1;
+  }
+  if ((latest.runId && latest.runId !== report.runId) ||
+      (latest.verdict && latest.verdict !== report.verdict)) {
+    console.error("latest.json metadata disagrees with the verified bundle.");
+    return 1;
+  }
+  const summary = join(runDirectoryReal, "summary.md");
   if (!existsSync(summary)) {
     console.error(`Latest summary is missing: ${summary}`);
     return 1;
   }
   console.log(readFileSync(summary, "utf8"));
-  return 0;
+  console.error(`! Bundle: ${verification.verdict}; signature=${verification.signatureStatus}. ${verification.notice}`);
+  for (const warning of [...verification.warnings, ...provenanceWarnings(cwd, runDirectoryReal, report)]) {
+    console.error(`! ${warning}`);
+  }
+  return exitCodeForVerdict(report.verdict);
+}
+
+/** The pointer survives a refused or crashed run, so a stale proof has to announce itself. */
+function provenanceWarnings(cwd, runDirectory, latest) {
+  const warnings = [];
+  if (latest.finishedAt) warnings.push(`This proof finished at ${latest.finishedAt}; it is not re-executed by \`dogfood report\`.`);
+  const current = gitHead(cwd);
+  const proven = provenHead(runDirectory);
+  if (current && proven && current !== proven) {
+    warnings.push(`Stale: the proof ran at commit ${proven}, but the workspace is now at ${current}. Start a fresh \`dogfood run\`.`);
+  }
+  return warnings;
+}
+
+function gitHead(cwd) {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" });
+  return result.status === 0 ? String(result.stdout || "").trim() : null;
+}
+
+function provenHead(runDirectory) {
+  try {
+    const summary = JSON.parse(readFileSync(join(runDirectory, "summary.json"), "utf8"));
+    return summary.repository?.after?.head || summary.repository?.before?.head || null;
+  } catch {
+    return null;
+  }
 }
 
 function printResult(report, artifactDir, contractPath) {
@@ -268,6 +360,8 @@ function printResult(report, artifactDir, contractPath) {
 function printVerification(verification) {
   console.log(`Dogfood bundle ${verification.verdict}${verification.runId ? ` — ${verification.runId}` : ""}`);
   console.log(`Bundle: ${verification.bundleDir}`);
+  console.log(`Verification level: ${verification.verificationLevel}`);
+  console.log(`Signature: ${verification.signatureStatus}`);
   for (const error of verification.errors) console.log(`  ✗ ${error}`);
   for (const warning of verification.warnings) console.log(`  ! ${warning}`);
   console.log(`\n${verification.notice}`);
@@ -283,15 +377,15 @@ Usage:
                    [--baseline-ref git-ref] [--json]
   dogfood run [--cwd dir] [--contract path] [--policy path]
               [--baseline-ref git-ref] [--json] [--timeout-ms n]
-              [--evidence advisory-receipt.json ...]
-  dogfood verify <bundle-dir> [--subject file] [--json]
-  dogfood migrate [--cwd dir] [--contract path] [--write]
+              [--evidence advisory-receipt.json ...] [--sign private-key]
+  dogfood verify <bundle-dir> [--subject file] [--key public-key] [--json]
+  dogfood keygen [--out dir] [--force]
   dogfood report [--cwd dir]
   dogfood version
   dogfood help
 
 Exit codes:
-  0  VALID, PASS, or verified bundle
+  0  VALID, PASS, or an INTACT/AUTHENTICATED bundle
   1  INVALID/FAIL (including tampering or incomplete verification)
   2  INFRA_ERROR
   3  Invalid CLI usage
@@ -299,6 +393,10 @@ Exit codes:
 
 Missing oracle = FAIL. Verification never repairs product code or tests.
 `);
+}
+
+function packageVersion() {
+  return JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
 }
 
 function inside(root, candidate) {

@@ -9,6 +9,16 @@ export class ContractInputError extends Error {
   }
 }
 
+/** Every repository-relative path a contract is discovered at, in precedence order. */
+export const CONTRACT_CANDIDATES = Object.freeze([
+  ".dogfood/dogfood.contract.yaml",
+  ".dogfood/dogfood.contract.yml",
+  ".dogfood/dogfood.contract.json",
+  "dogfood.contract.yaml",
+  "dogfood.contract.yml",
+  "dogfood.contract.json",
+]);
+
 export function findContractPath(cwd, explicit) {
   if (explicit) {
     const path = resolve(cwd, explicit);
@@ -16,14 +26,7 @@ export function findContractPath(cwd, explicit) {
     return path;
   }
 
-  const candidates = [
-    ".dogfood/dogfood.contract.yaml",
-    ".dogfood/dogfood.contract.yml",
-    ".dogfood/dogfood.contract.json",
-    "dogfood.contract.yaml",
-    "dogfood.contract.yml",
-    "dogfood.contract.json",
-  ];
+  const candidates = CONTRACT_CANDIDATES;
   for (const candidate of candidates) {
     const path = resolve(cwd, candidate);
     if (existsSync(path)) return path;

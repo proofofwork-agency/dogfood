@@ -1,11 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
+import { formatAjvError } from "./ajv-errors.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import { parse as parseYaml } from "yaml";
 import { isPathInside, normalizeGitPath, tryRealpath } from "./files.mjs";
 import { ContractInputError } from "./load-contract.mjs";
+import { matchesAny } from "./repository.mjs";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const contractSchema = JSON.parse(readFileSync(join(moduleDir, "..", "schemas", "contract.schema.json"), "utf8"));
@@ -30,13 +32,14 @@ export function loadPolicyDocument(cwd, explicitPath) {
     throw new ContractInputError(`Could not parse policy ${path}: ${error.message}`, { cause: error });
   }
   const ok = validateSchema(policy);
-  const errors = ok ? [] : validateSchema.errors.map(formatAjvError);
+  const errors = ok ? [] : validateSchema.errors.map((error) => formatAjvError(error, "policy"));
   return { policy, raw, path, validation: { ok, errors: [...new Set(errors)] } };
 }
 
 export function validateAuthoritativePolicy(contract, policy) {
   if (!policy) return { ok: true, errors: [], warnings: [] };
   const errors = [];
+  const warnings = [];
   const deterministic = (contract?.acceptanceCriteria || []).filter((item) => item?.class === "deterministic");
   const criteria = contract?.acceptanceCriteria || [];
   if (deterministic.length < policy.criteria.minimumDeterministic) {
@@ -53,7 +56,17 @@ export function validateAuthoritativePolicy(contract, policy) {
   if (policy.build.requireSubject && !contract?.build?.subject) {
     errors.push("authoritative policy requires build.subject");
   }
-  return { ok: errors.length === 0, errors, warnings: [] };
+  // A junit-xml command writes its report into the working tree, which authoritative mode reads as
+  // an untracked mutation unless the path is allowlisted. Warn rather than widen the allowlist from
+  // the contract: what a verification run may write to is the policy's decision, not the contract's.
+  const allowUntracked = policy.mutation?.allowUntracked || [];
+  for (const [name, definition] of Object.entries(contract?.commands || {})) {
+    if (definition?.adapter !== "junit-xml" || typeof definition.reportPath !== "string") continue;
+    if (!matchesAny(definition.reportPath, allowUntracked)) {
+      warnings.push(`commands.${name}.reportPath "${definition.reportPath}" is not covered by mutation.allowUntracked; writing the JUnit report will be reported as a mutation`);
+    }
+  }
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 export function defaultPolicyPath() {
@@ -90,11 +103,3 @@ export function validateProtectedPaths(cwd, paths) {
   return { ok: errors.length === 0, errors };
 }
 
-function formatAjvError(error) {
-  const path = error.instancePath ? error.instancePath.slice(1).replaceAll("/", ".") : "policy";
-  if (error.keyword === "additionalProperties") return `${path}: unknown field "${error.params.additionalProperty}"`;
-  if (error.keyword === "required") return `${path}: missing required field "${error.params.missingProperty}"`;
-  if (error.keyword === "const") return `${path}: must be ${JSON.stringify(error.params.allowedValue)}`;
-  if (error.keyword === "enum") return `${path}: must be one of ${error.params.allowedValues.map(JSON.stringify).join(", ")}`;
-  return `${path}: ${error.message}`;
-}

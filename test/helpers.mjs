@@ -1,13 +1,22 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { stringify as stringifyYaml } from "yaml";
 import { tryRealpath } from "../src/files.mjs";
 
+// node:test gives each test file its own process, so an exit hook is enough to
+// stop createProject() from leaking a temp git repo per fixture.
+const createdRoots = [];
+process.on("exit", removeCreatedRoots);
+process.once("SIGINT", () => {
+  removeCreatedRoots();
+  process.exit(130);
+});
+
 export function validContract(overrides = {}) {
   const contract = {
-    version: 2,
+    version: 1,
     project: "test-project",
     build: { requireIdentity: true },
     commands: {
@@ -64,6 +73,7 @@ export function authoritativePolicy(overrides = {}) {
 
 export function createProject(contract = validContract(), files = {}) {
   const directory = mkdtempSync(join(tmpdir(), "dogfood-v2-"));
+  createdRoots.push(directory);
   mkdirSync(join(directory, ".dogfood"), { recursive: true });
   writeFileSync(
     join(directory, ".dogfood", "dogfood.contract.yaml"),
@@ -123,6 +133,17 @@ export function playwrightExecution({
   results = [{ status: "passed", duration: 1 }],
 } = {}) {
   return { projectName, status, expectedStatus, results };
+}
+
+function removeCreatedRoots() {
+  while (createdRoots.length > 0) {
+    const directory = createdRoots.pop();
+    try {
+      rmSync(directory, { recursive: true, force: true, maxRetries: 3 });
+    } catch {
+      // One undeletable fixture must not strand the rest.
+    }
+  }
 }
 
 function deepMerge(base, overrides) {

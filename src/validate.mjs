@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { formatAjvError } from "./ajv-errors.mjs";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -18,20 +19,10 @@ const validateContractSchema = ajv.compile(contractSchema);
 const validateReceiptSchema = ajv.compile(receiptSchema);
 
 export function validateContract(contract) {
-  if (contract?.version === 1) {
-    return {
-      ok: false,
-      errors: [
-        "Contract version 1 is not supported by Dogfood v2. Run `dogfood migrate` and review the generated v2 contract.",
-      ],
-      warnings: [],
-    };
-  }
-
   const errors = [];
   const warnings = [];
   if (!validateContractSchema(contract)) {
-    errors.push(...validateContractSchema.errors.map(formatAjvError));
+    errors.push(...validateContractSchema.errors.map((error) => formatAjvError(error, "contract")));
   }
 
   if (!contract || typeof contract !== "object" || Array.isArray(contract)) {
@@ -47,6 +38,10 @@ export function validateContract(contract) {
   const criteria = Array.isArray(contract.acceptanceCriteria)
     ? contract.acceptanceCriteria
     : [];
+
+  if (Object.hasOwn(commands, "_build-identity")) {
+    errors.push('commands._build-identity is reserved for Dogfood\'s internal build identity check');
+  }
 
   if (typeof contract.project === "string" && contract.project.trim() === "") {
     errors.push("project must not be blank");
@@ -73,14 +68,15 @@ export function validateContract(contract) {
     }
   }
 
+  const ADAPTER_FOR_ORACLE_KIND = { command: "exit-code", playwright: "playwright-json", junit: "junit-xml" };
   for (const [name, oracle] of Object.entries(oracles)) {
     if (!oracle || typeof oracle !== "object") continue;
-    if (oracle.kind === "command" || oracle.kind === "playwright") {
+    const expectedAdapter = ADAPTER_FOR_ORACLE_KIND[oracle.kind];
+    if (expectedAdapter) {
       if (!Object.hasOwn(commands, oracle.command)) {
         errors.push(`oracles.${name} references unknown command "${oracle.command}"`);
         continue;
       }
-      const expectedAdapter = oracle.kind === "command" ? "exit-code" : "playwright-json";
       if (commands[oracle.command]?.adapter !== expectedAdapter) {
         errors.push(
           `oracles.${name} kind=${oracle.kind} requires commands.${oracle.command}.adapter=${expectedAdapter}`,
@@ -91,6 +87,7 @@ export function validateContract(contract) {
 
   const ids = new Set();
   const deterministicPlaywrightCommands = new Set();
+  const deterministicJunitCommands = new Set();
   const deterministicCommands = new Set();
   for (const [index, criterion] of criteria.entries()) {
     if (!criterion || typeof criterion !== "object") continue;
@@ -133,6 +130,15 @@ export function validateContract(contract) {
           );
         }
       }
+      // A JUnit selector names a foreign runner's own testcase, so it cannot be forced to encode
+      // the criterion id the way a Playwright tag can. Renaming the test therefore unbinds the
+      // criterion — which FAILS the run (the selector matches nothing), never silently passes it.
+      if (
+        criterion.class === "deterministic" &&
+        oracles[criterion.oracle]?.kind === "junit"
+      ) {
+        deterministicJunitCommands.add(oracles[criterion.oracle].command);
+      }
     }
 
     if (criterion.class === "excluded" && String(criterion.reason || "").trim() === "") {
@@ -150,6 +156,14 @@ export function validateContract(contract) {
     ) {
       errors.push(
         `commands.${name} uses playwright-json in a gate but has no deterministic Playwright oracle tag`,
+      );
+    }
+    if (
+      commands[name]?.adapter === "junit-xml" &&
+      !deterministicJunitCommands.has(name)
+    ) {
+      errors.push(
+        `commands.${name} uses junit-xml in a gate but has no deterministic JUnit oracle testcase`,
       );
     }
     if (Object.hasOwn(commands, name) && !deterministicCommands.has(name)) {
@@ -191,22 +205,6 @@ export function validateAdvisoryReceipt(receipt) {
   };
 }
 
-function formatAjvError(error, root = "contract") {
-  const path = error.instancePath ? error.instancePath.slice(1).replaceAll("/", ".") : root;
-  if (error.keyword === "additionalProperties") {
-    return `${path}: unknown field "${error.params.additionalProperty}"`;
-  }
-  if (error.keyword === "required") {
-    return `${path}: missing required field "${error.params.missingProperty}"`;
-  }
-  if (error.keyword === "const") {
-    return `${path}: must be ${JSON.stringify(error.params.allowedValue)}`;
-  }
-  if (error.keyword === "enum") {
-    return `${path}: must be one of ${error.params.allowedValues.map(JSON.stringify).join(", ")}`;
-  }
-  return `${path}: ${error.message}`;
-}
 
 function unique(values) {
   return [...new Set(values)];

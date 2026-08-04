@@ -2,25 +2,42 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { portableRelative } from "./files.mjs";
-import { listFiles, sha256 } from "./report.mjs";
+import { sha256 } from "./hash.mjs";
+import { listBundleEntries } from "./report.mjs";
+import { embeddedPublicKey, keyIdFor, loadPublicKey, SIGNATURE_FILE, verifyManifestSignature } from "./sign.mjs";
 
-const NOTICE = "Integrity verification proves internal consistency, not cryptographic provenance. A malicious actor can regenerate this unsigned manifest; signing is deferred.";
+const NOTICE_UNSIGNED = "Integrity verification proves internal consistency, not cryptographic provenance. A malicious actor can regenerate this unsigned manifest. Sign it with dogfood run --sign to bind it to a key.";
+const NOTICE_UNVERIFIED = "This bundle carries a signature that was NOT checked. The public key recorded inside a manifest is not a trust anchor, because whoever regenerates the manifest can also regenerate the key. Re-run with --key <public key obtained out of band> to establish provenance.";
+const NOTICE_VERIFIED = "The detached signature was verified against the supplied public key, so this bundle came from the holder of that key. Provenance is only as good as your independent trust in the key.";
+const NOTICE_INVALID = "This bundle carries a signature that does NOT match the supplied public key. Either the bundle was altered after signing, or it was signed by someone else. Do not trust it.";
 
-export function verifyBundle(bundleDir, { subject = null, cwd = process.cwd() } = {}) {
+export function verifyBundle(
+  bundleDir,
+  { subject = null, key = null, cwd = process.cwd(), requireSubject = true } = {},
+) {
   const directory = resolve(cwd, bundleDir);
   const errors = [];
   const warnings = [];
+  let signatureStatus = "absent";
   const manifestPath = join(directory, "manifest.json");
   if (!existsSync(manifestPath)) return result(directory, null, ["manifest.json is missing"], warnings);
+  let manifestBytes;
+  try {
+    const stat = lstatSync(manifestPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      return result(directory, null, ["manifest.json is not a regular file"], warnings);
+    }
+    // This exact buffer is both parsed below and checked by the detached signature. Reading the
+    // manifest again after the checksum walk would let a concurrent writer swap the signed bytes.
+    manifestBytes = readFileSync(manifestPath);
+  } catch (error) {
+    return result(directory, null, [`manifest.json could not be read: ${error.message}`], warnings);
+  }
   let manifest;
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest = JSON.parse(manifestBytes.toString("utf8"));
   } catch (error) {
     return result(directory, null, [`manifest.json is invalid JSON: ${error.message}`], warnings);
-  }
-  if (manifest?.version === 2) {
-    return result(directory, manifest, ["report/manifest v2 cannot be verified reproducibly because it lacks a source-contract digest; rerun with Dogfood v0.3"], warnings);
   }
   validateManifest(manifest, errors);
   if (errors.length > 0) return result(directory, manifest, errors, warnings);
@@ -48,10 +65,27 @@ export function verifyBundle(bundleDir, { subject = null, cwd = process.cwd() } 
     const actual = sha256(readFileSync(path));
     if (actual !== expected) errors.push(`checksum mismatch: ${name}`);
   }
-  for (const file of listFiles(directory)) {
-    const name = portableRelative(directory, file);
-    if (name !== "manifest.json" && !recorded.has(name) && !name.includes(".tmp-")) {
-      errors.push(`unrecorded file is present in bundle: ${name}`);
+  let entries = [];
+  try {
+    entries = listBundleEntries(directory);
+  } catch (error) {
+    errors.push(`bundle contents could not be enumerated: ${error.message}`);
+  }
+  for (const entry of entries) {
+    if (entry.kind === "directory") {
+      errors.push(`unrecorded directory is present in bundle: ${entry.name}`);
+      continue;
+    }
+    if (entry.kind === "hardlink") {
+      // An archiver may legitimately hardlink a stored bundle, so this cannot be an error.
+      warnings.push(`recorded file has a second hard link, so its content can change from outside the bundle: ${entry.name}`);
+    } else if (entry.kind !== "file") {
+      errors.push(`bundle contains a non-regular file: ${entry.name}`);
+      continue;
+    }
+    // Exempt by EXACT name only. A substring exemption is what let planted files through before.
+    if (entry.name !== "manifest.json" && entry.name !== SIGNATURE_FILE && !recorded.has(entry.name)) {
+      errors.push(`unrecorded file is present in bundle: ${entry.name}`);
     }
   }
 
@@ -78,8 +112,10 @@ export function verifyBundle(bundleDir, { subject = null, cwd = process.cwd() } 
   }
 
   const declaredSubject = manifest.build?.subject || null;
-  if (declaredSubject && !subject) {
+  if (declaredSubject && !subject && requireSubject) {
     errors.push("bundle declares a build subject; --subject <file> is required for verification");
+  } else if (declaredSubject && !subject) {
+    warnings.push("the recorded build subject was not re-checked against an external file");
   } else if (declaredSubject && subject) {
     const subjectPath = resolve(cwd, subject);
     if (!existsSync(subjectPath) || !statSync(subjectPath).isFile()) {
@@ -93,7 +129,73 @@ export function verifyBundle(bundleDir, { subject = null, cwd = process.cwd() } 
   } else if (!declaredSubject && subject) {
     errors.push("--subject was supplied but the bundle does not declare a build subject");
   }
-  return result(directory, manifest, errors, warnings);
+
+  signatureStatus = checkSignature(directory, manifest, manifestBytes, key, cwd, errors);
+  return result(directory, manifest, errors, warnings, signatureStatus);
+}
+
+/**
+ * Returns "absent" | "unverified" | "verified". Anything wrong pushes an error and the bundle is
+ * INVALID; a signature that is merely unchecked is NOT an error, but it is also not provenance.
+ */
+function checkSignature(directory, manifest, manifestBytes, key, cwd, errors) {
+  const signaturePath = join(directory, SIGNATURE_FILE);
+  const declared = manifest.signing || null;
+  const present = existsSync(signaturePath);
+
+  if (declared && !present) {
+    errors.push(`manifest declares a signature but ${SIGNATURE_FILE} is missing`);
+    return "absent";
+  }
+  if (!declared && present) {
+    errors.push(`${SIGNATURE_FILE} is present but the manifest does not declare a signature`);
+    return "absent";
+  }
+  if (!declared) {
+    if (key) errors.push("--key was supplied but the bundle is not signed");
+    return "absent";
+  }
+  if (declared.algorithm !== "ed25519") {
+    errors.push(`unsupported signature algorithm: ${JSON.stringify(declared.algorithm)}`);
+    return "absent";
+  }
+
+  let signature;
+  try {
+    const stat = lstatSync(signaturePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      errors.push(`${SIGNATURE_FILE} is not a regular file`);
+      return "invalid";
+    }
+    signature = readFileSync(signaturePath, "utf8");
+  } catch (error) {
+    errors.push(`${SIGNATURE_FILE} could not be read: ${error.message}`);
+    return "invalid";
+  }
+
+  if (!key) {
+    // Deliberately do NOT validate against the embedded key and call it verified. Doing so would
+    // anchor the bundle to itself and turn a self-signed forgery into a green check.
+    return "unverified";
+  }
+
+  let anchor;
+  try {
+    anchor = loadPublicKey(resolve(cwd, key));
+  } catch (error) {
+    errors.push(error.message);
+    return "unverified";
+  }
+  if (!verifyManifestSignature(manifestBytes, signature, anchor)) {
+    errors.push("manifest signature does not verify against the supplied public key");
+    return "invalid";
+  }
+  const embedded = embeddedPublicKey(declared);
+  if (embedded && embedded.export({ type: "spki", format: "pem" }) !== anchor.export({ type: "spki", format: "pem" })) {
+    errors.push("bundle records a different public key than the one supplied");
+    return "invalid";
+  }
+  return "verified";
 }
 
 function validateManifest(manifest, errors) {
@@ -101,11 +203,11 @@ function validateManifest(manifest, errors) {
     errors.push("manifest root must be an object");
     return;
   }
-  if (manifest.version !== 3) errors.push(`unsupported manifest version: ${JSON.stringify(manifest.version)}`);
+  if (manifest.version !== 1) errors.push(`unsupported manifest version: ${JSON.stringify(manifest.version)}`);
   const allowed = new Set([
     "version", "checksumAlgorithm", "runId", "mode", "profile", "verdict", "validationVerdict",
     "proofVerdict", "contract", "policy", "repository", "runtime", "package", "build", "commands",
-    "adapters", "baseline", "metadata", "startedAt", "finishedAt", "checksums", "integrityNotice",
+    "adapters", "baseline", "metadata", "startedAt", "finishedAt", "checksums", "signing", "integrityNotice",
   ]);
   for (const field of Object.keys(manifest)) {
     if (!allowed.has(field)) errors.push(`manifest has unknown field: ${field}`);
@@ -143,6 +245,35 @@ function validateManifest(manifest, errors) {
       typeof subject.path !== "string" || !subject.path || !/^[a-f0-9]{64}$/.test(subject.digest || "") ||
       !Number.isSafeInteger(subject.size) || subject.size < 0) {
       errors.push("manifest.build.subject is invalid");
+    }
+  }
+  if (manifest.signing !== null && manifest.signing !== undefined) {
+    const signing = manifest.signing;
+    if (!signing || typeof signing !== "object" || Array.isArray(signing)) {
+      errors.push("manifest.signing must be an object or null");
+    } else {
+      const allowedSigning = new Set(["algorithm", "keyId", "publicKey", "signatureFile"]);
+      for (const field of Object.keys(signing)) {
+        if (!allowedSigning.has(field)) errors.push(`manifest.signing has unknown field: ${field}`);
+      }
+      if (signing.algorithm !== "ed25519") errors.push("manifest.signing.algorithm must be ed25519");
+      if (!/^[a-f0-9]{32}$/.test(signing.keyId || "")) errors.push("manifest.signing.keyId is invalid");
+      if (typeof signing.publicKey !== "string" || signing.publicKey.length === 0) {
+        errors.push("manifest.signing.publicKey must be a non-empty string");
+      } else {
+        const publicKey = embeddedPublicKey(signing);
+        if (!publicKey || publicKey.asymmetricKeyType !== "ed25519") {
+          errors.push("manifest.signing.publicKey must encode an ed25519 public key");
+        } else {
+          const pem = publicKey.export({ type: "spki", format: "pem" });
+          if (keyIdFor(pem) !== signing.keyId) {
+            errors.push("manifest.signing.keyId does not match manifest.signing.publicKey");
+          }
+        }
+      }
+      if (signing.signatureFile !== SIGNATURE_FILE) {
+        errors.push(`manifest.signing.signatureFile must be ${SIGNATURE_FILE}`);
+      }
     }
   }
 }
@@ -195,17 +326,30 @@ function safeBundlePath(directory, name) {
   return candidate;
 }
 
-function result(directory, manifest, errors, warnings) {
+function result(directory, manifest, errors, warnings, signatureStatus = "absent") {
+  const notice = signatureStatus === "verified"
+    ? NOTICE_VERIFIED
+    : signatureStatus === "unverified"
+      ? NOTICE_UNVERIFIED
+      : signatureStatus === "invalid"
+        ? NOTICE_INVALID
+        : NOTICE_UNSIGNED;
   return {
     version: 1,
     bundleDir: directory,
     runId: manifest?.runId || null,
     ok: errors.length === 0,
-    verdict: errors.length === 0 ? "VERIFIED" : "INVALID",
+    // Integrity and externally anchored provenance are different outcomes. Both are successful
+    // checks, but only AUTHENTICATED says who produced the bundle.
+    verdict: errors.length > 0
+      ? "INVALID"
+      : signatureStatus === "verified" ? "AUTHENTICATED" : "INTACT",
+    verificationLevel: errors.length > 0
+      ? "none"
+      : signatureStatus === "verified" ? "provenance" : "integrity",
+    signatureStatus,
     errors,
     warnings,
-    notice: NOTICE,
+    notice,
   };
 }
-
-

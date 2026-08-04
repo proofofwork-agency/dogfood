@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Dogfood">
+  <title>Dogfood</title>
+  <!-- A seal, closed only on the proven side. Two states, one mark. -->
+  <path d="M16 3 27 7.2v8.6c0 6.2-4.4 10.9-11 12.5C9.4 26.7 5 22 5 15.8V7.2L16 3Z"
+        stroke="#3ddc84" stroke-width="2" stroke-linejoin="round" opacity="0.7"/>
+  <path d="M10.8 16.1l3.5 3.5 6.9-7.4" stroke="#3ddc84" stroke-width="2.6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

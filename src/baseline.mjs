@@ -2,17 +2,28 @@ import { spawnSync } from "node:child_process";
 import { extname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isPathInside, normalizeGitPath, portableRelative, tryRealpath } from "./files.mjs";
+import { CONTRACT_CANDIDATES } from "./load-contract.mjs";
 import { validateContract } from "./validate.mjs";
 
 export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
   if (!ref) return null;
   const result = {
     ref,
+    resolvedRef: null,
     found: false,
+    compared: false,
+    comparedPath: null,
+    notComparedReason: null,
     errors: [],
     warnings: [],
     changes: [],
   };
+  // A control character cannot be part of a ref name; it only reaches spawnSync as a raw
+  // TypeError and injects newlines into the Markdown evidence, so it is refused unquoted.
+  if (hasControlCharacter(String(ref))) {
+    result.errors.push("baseline ref contains control characters");
+    return result;
+  }
   const rootResult = git(cwd, ["rev-parse", "--show-toplevel"]);
   if (rootResult.status !== 0) {
     result.errors.push(`could not locate Git root for baseline ${ref}: ${clean(rootResult.stderr)}`);
@@ -24,31 +35,66 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
     return result;
   }
   const rel = portableRelative(root, contractPath);
-  const commitResult = git(root, ["rev-parse", "--verify", `${ref}^{commit}`]);
-  if (commitResult.status !== 0) {
+  const commitResult = git(root, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]);
+  const resolvedRef = String(commitResult.stdout || "").trim();
+  // Only the resolved object id is ever handed to `git show`; a user string could be read as an option.
+  // Both object formats are accepted, so a SHA-256 repository is not rejected as unresolvable.
+  if (commitResult.status !== 0 || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(resolvedRef)) {
     result.errors.push(`baseline ref does not resolve to a commit: ${ref}`);
     return result;
   }
-  const source = git(root, ["show", `${ref}:${rel}`], 10 * 1024 * 1024);
+  result.resolvedRef = resolvedRef;
+  let source = git(root, ["show", `${resolvedRef}:${rel}`], 10 * 1024 * 1024);
+  let comparedPath = rel;
   if (source.status !== 0) {
-    result.warnings.push(`baseline contract is absent at ${ref}:${rel}; treating this as first adoption`);
-    return result;
+    // "Absent at this path" is not the same as "absent". Moving or renaming the contract in the
+    // same change set would otherwise read as first adoption and silently skip every regression
+    // rule — a rename plus a removed deterministic criterion would pass. So before believing this
+    // is a first adoption, look for a contract at any discovery path in the baseline commit.
+    const moved = findBaselineContract(root, resolvedRef, rel);
+    if (moved) {
+      source = moved.source;
+      comparedPath = moved.path;
+      result.changes.push(change("contract-moved", null, "contractPath", moved.path, rel, true));
+      result.warnings.push(`contract moved from ${moved.path} to ${rel} since ${ref}; the baseline was compared against its previous location`);
+    } else {
+      result.notComparedReason = "baseline-absent";
+      result.warnings.push(`baseline contract is absent at ${ref}:${rel}; treating this as first adoption`);
+      return result;
+    }
   }
   result.found = true;
+  result.comparedPath = comparedPath;
   let baseline;
   try {
     baseline = extname(contractPath).toLowerCase() === ".json"
       ? JSON.parse(source.stdout)
       : parseYaml(source.stdout);
   } catch (error) {
+    // Unlike a schema mismatch, a baseline that is not even parseable is not an expected
+    // consequence of any format change; it means the committed contract was broken. Stays blocking.
+    result.notComparedReason = "baseline-unparseable";
     result.errors.push(`baseline contract at ${ref}:${rel} could not be parsed: ${error.message}`);
     return result;
   }
+  // A baseline that does not validate under the *current* schema means the two contracts are not
+  // in the same format, so a field-by-field comparison would be meaningless — it does not mean a
+  // regression occurred. Blocking here would make the tool structurally incapable of ever changing
+  // its own contract format: the very commit that introduces the change can never go green.
+  //
+  // This cannot be abused to skip the check. A baseline is a past commit and is immutable, so the
+  // only way it stops validating is a schema change in this same change set — which is reviewable
+  // code under CODEOWNERS. The head contract is still fully validated, and the authoritative
+  // criteria floor and required gates still apply. So this degrades loudly rather than silently.
   const baselineValidation = validateContract(baseline);
   if (!baselineValidation.ok) {
-    result.errors.push(`baseline contract at ${ref}:${rel} is invalid: ${baselineValidation.errors.join("; ")}`);
+    result.notComparedReason = "baseline-invalid";
+    result.warnings.push(
+      `baseline contract at ${ref}:${rel} does not validate under the current schema, so no regression comparison was performed: ${baselineValidation.errors.join("; ")}`,
+    );
     return result;
   }
+  result.compared = true;
 
   const beforeCriteria = new Map((baseline.acceptanceCriteria || []).map((item) => [item.id, item]));
   const afterCriteria = new Map((contract?.acceptanceCriteria || []).map((item) => [item.id, item]));
@@ -115,6 +161,20 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
   return result;
 }
 
+/**
+ * The contract as it existed at the baseline, wherever it lived then. Only the standard discovery
+ * paths are searched: a contract at an arbitrary path was reached through an explicit --contract,
+ * and guessing at it would compare against a document the project never treated as its contract.
+ */
+function findBaselineContract(root, resolvedRef, currentRel) {
+  for (const candidate of CONTRACT_CANDIDATES) {
+    if (candidate === currentRel) continue;
+    const source = git(root, ["show", `${resolvedRef}:${candidate}`], 10 * 1024 * 1024);
+    if (source.status === 0) return { source, path: candidate };
+  }
+  return null;
+}
+
 function compareNamedDefinitions(changes, collection, beforeValues, afterValues, fields) {
   const names = new Set([...Object.keys(beforeValues), ...Object.keys(afterValues)]);
   for (const name of names) {
@@ -143,6 +203,8 @@ function change(type, criterionId, field, before, after, reviewRequired = false)
 function git(cwd, args, maxBuffer = 1024 * 1024) {
   return spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer });
 }
+
+function hasControlCharacter(value) { return [...value].some((character) => character.codePointAt(0) < 0x20 || character.codePointAt(0) === 0x7f); }
 
 function clean(value) {
   return String(value || "").trim().split("\n").filter(Boolean).at(-1) || "Git command failed";

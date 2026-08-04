@@ -1,8 +1,7 @@
 {
   "name": "@proofofwork-agency/dogfood",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Portable evidence gate with exact command and Playwright acceptance proof.",
-  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/proofofwork-agency/dogfood.git"
@@ -24,6 +23,7 @@
     "src/",
     "schemas/",
     "templates/",
+    "docs/",
     "examples/minimal/.dogfood/",
     "examples/minimal/checks/",
     "examples/minimal-broken/.dogfood/",
@@ -33,12 +33,20 @@
     "examples/playwright/page.html",
     "examples/playwright/playwright.config.mjs",
     "examples/playwright/server.mjs",
+    "examples/junit/.dogfood/",
+    "examples/junit/checks/",
+    "examples/junit/README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "dogfood": "node bin/dogfood.mjs",
-    "test": "node --test test/adapters.test.mjs test/baseline.test.mjs test/cli.test.mjs test/contract.test.mjs test/integration.test.mjs test/policy.test.mjs test/runtime.test.mjs test/verify.test.mjs",
+    "test": "node --test test/adapters.test.mjs test/baseline.test.mjs test/cli.test.mjs test/contract.test.mjs test/docs.test.mjs test/files.test.mjs test/integration.test.mjs test/junit-adapter.test.mjs test/junit-adversarial.test.mjs test/junit.test.mjs test/meta.test.mjs test/package-contents.test.mjs test/policy.test.mjs test/report.test.mjs test/runtime.test.mjs test/sign.test.mjs test/verify.test.mjs test/workflow.test.mjs",
+    "prepublishOnly": "npm test && node scripts/check-package-contents.mjs",
     "test:playwright-fixture": "node test/playwright-fixture.mjs",
     "test:self": "cd examples/minimal && node ../../bin/dogfood.mjs run"
   },
@@ -58,5 +66,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

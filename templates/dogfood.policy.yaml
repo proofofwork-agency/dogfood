@@ -27,9 +27,24 @@ logs:
   capture: full-redacted
   redactEnv:
     - GITHUB_TOKEN
+    - AWS_ACCESS_KEY_ID
     - "*_TOKEN"
     - "*_SECRET"
     - "*_PASSWORD"
     - "*_KEY"
+    - "*_KEY_ID"
     - "*_CREDENTIAL*"
+    - "*_CONNECTION_STRING"
+    - CONNECTION_STRING
+    - "*_DSN"
+    - DATABASE_URL
+    - "*_DATABASE_URL"
+    - REDIS_URL
+    - MONGO_URL
+    - MONGODB_URI
+    - AMQP_URL
+    - POSTGRES_URL
+    - "*_URI"
+    - "*_AUTH"
+    - "*_COOKIE"
   redactLiterals: []

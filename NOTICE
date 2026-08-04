@@ -1,0 +1,32 @@
+Dogfood
+Copyright 2026 proofofwork-agency
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product contains no third-party source code. Its runtime dependencies are
+resolved by the package manager and are not redistributed in this repository or
+in the published package:
+
+  ajv           8.x   MIT
+  ajv-formats   3.x   MIT
+  yaml          2.x   ISC
+
+Those pull in, transitively:
+
+  fast-deep-equal         3.x   MIT
+  fast-uri                3.x   BSD-3-Clause
+  json-schema-traverse    1.x   MIT
+  require-from-string     2.x   MIT
+
+JUnit XML
+---------
+Dogfood reads and writes the file format commonly called "JUnit XML". That format
+was never specified by the JUnit project; the shape every runner emits descends
+from the Apache Ant task org.apache.tools.ant.taskdefs.optional.junit
+(Apache Ant, Apache License 2.0).
+
+Dogfood contains no JUnit source code, links to no JUnit library, and bundles no
+JUnit schema. It implements an independent reader and writer for a file format.
+JUnit itself is a separate work: JUnit 4 is licensed under the Eclipse Public
+License 1.0 and JUnit 5 under the Eclipse Public License 2.0. Neither licence
+applies to this product.

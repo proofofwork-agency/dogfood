@@ -1,9 +1,25 @@
-import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, rmdirSync } from "node:fs";
 import { arch, platform, release } from "node:os";
 import { join } from "node:path";
 import { ADAPTER_VERSIONS } from "./adapters.mjs";
-import { atomicWriteFile, atomicWriteJson, portableRelative } from "./files.mjs";
+import { sha256 } from "./hash.mjs";
+import { atomicWriteFile, atomicWriteJson, portableRelative, sweepPendingTemps } from "./files.mjs";
+import { createDocumentRedactor } from "./redact.mjs";
+
+export class BundleIntegrityError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "BundleIntegrityError";
+  }
+}
+
+/** A report whose verdict cannot express the problems it carries; a runner fault, never user input. */
+export class ReportInvariantError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ReportInvariantError";
+  }
+}
 
 export function buildReport({
   contract,
@@ -27,6 +43,7 @@ export function buildReport({
   baseline = null,
   metadata = {},
   digests = {},
+  documentRedactor = createDocumentRedactor(),
 }) {
   const hardFails = [
     ...validation.errors.map((message) => ({ kind: "contract", category: "product", message })),
@@ -59,11 +76,24 @@ export function buildReport({
   }
 
   const uniqueHardFails = deduplicateProblems(hardFails);
+  // A validate report's verdict is the validation verdict alone, so a blocking problem of any
+  // other kind would sit in the bundle behind VALID and exit 0. Callers must not reach here with
+  // one; refusing to emit the report is the only outcome that cannot be mistaken for a pass.
+  if (validateOnly) {
+    const inexpressible = uniqueHardFails.filter((problem) => problem.kind !== "contract");
+    if (inexpressible.length > 0) {
+      throw new ReportInvariantError(
+        `validate mode collected blocking problems its verdict cannot express: ${
+          inexpressible.map((problem) => `${problem.kind}: ${problem.message}`).join("; ")
+        }`,
+      );
+    }
+  }
   const validationVerdict = validation.ok ? "VALID" : "INVALID";
   const proofVerdict = validateOnly || !validation.ok ? "NOT_RUN" : classifyVerdict(uniqueHardFails);
   const verdict = validateOnly ? validationVerdict : validation.ok ? proofVerdict : "FAIL";
   return {
-    version: 3,
+    version: 1,
     runId,
     mode: validateOnly ? "validate" : "run",
     profile: authoritative ? "authoritative" : "standard",
@@ -97,7 +127,7 @@ export function buildReport({
     },
     baseline,
     metadata,
-    commands: commandResults.map(summarizeCommand),
+    commands: commandResults.map((result) => summarizeCommand(result, documentRedactor)),
     acceptanceCriteria: acResults,
     advisoryEvidence: advisoryReceipts,
     hardFails: uniqueHardFails,
@@ -114,7 +144,7 @@ export function writeReport(artifactDir, report) {
   atomicWriteJson(join(artifactDir, "summary.json"), report);
   atomicWriteFile(join(artifactDir, "summary.md"), toMarkdown(report), "utf8");
   atomicWriteJson(join(artifactDir, "matrix.json"), {
-    version: 3,
+    version: 1,
     project: report.project,
     runId: report.runId,
     verdict: report.verdict,
@@ -126,14 +156,24 @@ export function writeReport(artifactDir, report) {
 }
 
 export function writeManifest(artifactDir, details) {
+  const swept = sweepPendingTemps(artifactDir);
+  if (swept.length > 0 && process.env.DOGFOOD_DEBUG) {
+    console.error(`Dogfood swept leaked temp files before the manifest: ${swept.join(", ")}`);
+  }
+  pruneEmptyDirectories(artifactDir);
   const checksums = {};
-  for (const file of listFiles(artifactDir)) {
-    const name = portableRelative(artifactDir, file);
-    if (name === "manifest.json") continue;
-    checksums[name] = sha256(readFileSync(file));
+  for (const entry of listBundleEntries(artifactDir)) {
+    if (entry.kind === "hardlink") {
+      throw new BundleIntegrityError(`bundle entry has a second hard link and is not a self-contained record: ${entry.name}`);
+    }
+    if (entry.kind !== "file") {
+      throw new BundleIntegrityError(`bundle contains a non-regular entry that cannot be checksummed: ${entry.name}`);
+    }
+    if (entry.name === "manifest.json") continue;
+    checksums[entry.name] = sha256(readFileSync(entry.path));
   }
   const manifest = {
-    version: 3,
+    version: 1,
     checksumAlgorithm: "sha256",
     runId: details.runId,
     mode: details.mode,
@@ -159,16 +199,19 @@ export function writeManifest(artifactDir, details) {
     startedAt: details.startedAt,
     finishedAt: details.finishedAt,
     checksums,
-    integrityNotice: "Checksums prove internal consistency, not provenance. A malicious actor can regenerate this unsigned manifest; signing is deferred.",
+    signing: details.signing || null,
+    integrityNotice: details.signing
+      ? "Checksums prove internal consistency. The detached signature proves provenance only when verified against a public key obtained out of band (dogfood verify --key); the key recorded here is not a trust anchor."
+      : "Checksums prove internal consistency, not provenance. A malicious actor can regenerate this unsigned manifest. Sign it with dogfood run --sign to bind it to a key.",
   };
   atomicWriteJson(join(artifactDir, "manifest.json"), manifest);
   return manifest;
 }
 
-function summarizeCommand(result) {
+function summarizeCommand(result, documentRedactor) {
   return {
     name: result.name,
-    run: result.definition?.run || result.command,
+    run: documentRedactor.apply(result.definition?.run || result.command),
     adapter: result.definition?.adapter || result.adapter?.adapter || null,
     blocking: result.blocking !== false,
     status: result.status,
@@ -195,10 +238,11 @@ function nextSteps(verdict, hardFails, validateOnly) {
     return ["Recover the environment or runner.", "Start a fresh complete `dogfood run`; this run is not reusable as proof."];
   }
   const steps = ["Do not treat this run as proof of acceptance."];
-  if (hardFails.some((problem) => problem.kind === "contract")) steps.push("Fix the v2 contract, policy, baseline regression, or oracle mappings, then start a fresh run.");
+  if (hardFails.some((problem) => problem.kind === "contract")) steps.push("Fix the contract, policy, baseline regression, or oracle mappings, then start a fresh run.");
   if (hardFails.some((problem) => problem.kind === "mutation")) steps.push("Remove mutation from verification commands; Dogfood never accepts a self-changing proof.");
   if (hardFails.some((problem) => problem.kind === "command" || problem.kind === "acceptance-criterion")) steps.push("Re-implement against the failing evidence, or re-refine only if the criterion is wrong.");
   if (hardFails.some((problem) => problem.kind === "evidence")) steps.push("Restore exact structured evidence; a successful process without its evidence cannot pass.");
+  if (hardFails.some((problem) => problem.kind === "advisory-input")) steps.push("Fix or drop the rejected `--evidence` receipt; the product code is not what failed here. An advisory assessment never changes the verdict, but an unreadable receipt argument is not silently ignored.");
   steps.push("Do not edit product code or tests inside the verification run to force green.");
   return steps;
 }
@@ -248,7 +292,7 @@ function toMarkdown(report) {
     }
   }
   if (report.baseline) {
-    lines.push("", "## Baseline comparison", "", `Baseline: \`${report.baseline.ref}\``);
+    lines.push("", "## Baseline comparison", "", `Baseline: \`${escapeInline(report.baseline.ref)}\``);
     if (!report.baseline.found) lines.push("", "_No baseline contract was found; this is recorded as first adoption._");
     for (const item of report.baseline.changes || []) lines.push(`- ${item.field}${item.criterionId ? ` for ${item.criterionId}` : ""}${item.reviewRequired ? " — code-owner review required" : ""}`);
   }
@@ -291,21 +335,44 @@ function toJunit(report) {
   return ['<?xml version="1.0" encoding="UTF-8"?>', `<testsuite name="dogfood" tests="${cases.length}" failures="${failures}" errors="${errors}" skipped="${skipped}" time="${(report.durationMs / 1000).toFixed(3)}">`, ...cases.map((testCase) => `  ${testCase}`), "</testsuite>", ""].join("\n");
 }
 
-export function listFiles(root) {
-  const files = [];
+/**
+ * Every bundle entry with the relative name accumulated from the walk itself, sorted by name.
+ * The name is never re-derived from the path, so a filename holding a backslash or padding
+ * whitespace can never alias onto an already-recorded entry. Dirent is lstat-based, so a
+ * symlinked directory is never traversed. A directory with no descendants is its own entry.
+ */
+export function listBundleEntries(root, prefix = "") {
+  const entries = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const path = join(root, entry.name);
-    if (entry.isDirectory()) files.push(...listFiles(path));
-    else if (entry.isFile() && statSync(path).isFile()) files.push(path);
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (!entry.isDirectory()) {
+      entries.push({ path, name, kind: entryKind(entry, path) });
+      continue;
+    }
+    const nested = listBundleEntries(path, name);
+    if (nested.length === 0) entries.push({ path, name, kind: "directory" });
+    else entries.push(...nested);
   }
-  return files.sort();
+  return entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+}
+
+/** Drop directories that hold nothing, bottom-up; a bundle is described entirely by its files. */
+export function pruneEmptyDirectories(root) {
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const path = join(root, entry.name);
+    pruneEmptyDirectories(path);
+    if (readdirSync(path).length === 0) rmdirSync(path);
+  }
+}
+
+export function listFiles(root) {
+  return listBundleEntries(root).filter((entry) => entry.kind === "file").map((entry) => entry.path);
 }
 
 export { portableRelative };
 
-export function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
 
 function deduplicateProblems(problems) {
   const seen = new Set();
@@ -317,6 +384,18 @@ function deduplicateProblems(problems) {
   });
 }
 
-function escapeCell(value) { return String(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " "); }
-function escapeInline(value) { return String(value).replaceAll("`", "\\`"); }
+function entryKind(entry, path) {
+  if (entry.isSymbolicLink()) return "symlink";
+  if (!entry.isFile()) return "other";
+  // A second hard link makes the bundle's own content editable from outside it.
+  const links = hardLinkCount(path);
+  if (links === null) return "unreadable";
+  return links > 1 ? "hardlink" : "file";
+}
+function hardLinkCount(path) { try { return lstatSync(path).nlink; } catch { return null; } }
+function escapeCell(value) { return String(value ?? "").replaceAll("|", "\\|").replace(/[\r\n]+/g, " "); }
+function escapeInline(value) { return String(value).replaceAll("`", "\\`").replace(/[\r\n]+/g, " "); }
 function xml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
+
+// Re-exported for callers that already depend on report.mjs for bundle helpers.
+export { sha256 };

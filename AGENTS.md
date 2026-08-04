@@ -1,30 +1,30 @@
-# Dogfood — agent notes
+# Dogfood agent contract
 
-## What this package is
+Dogfood is a portable evidence gate. The normative operating instructions are in `templates/skill/SKILL.md`; product and format details are in `docs/`.
 
-Portable **prove-it** gate for any Proof of Work project after refine/implement.
+## Commands
 
-- CLI: `dogfood validate` | `dogfood run` | `dogfood init`
-- Contract: `.dogfood/dogfood.contract.yaml`
-- Report: `artifacts/dogfood/<runId>/summary.md`
+`dogfood help` · `dogfood version` · `dogfood init` · `dogfood validate` · `dogfood run` · `dogfood verify` · `dogfood report` · `dogfood keygen`
 
-## Rules for agents
+When `.dogfood/dogfood.policy.yaml` exists, pass it explicitly with `--policy`; policies are not auto-discovered. `artifacts/dogfood/latest.json` selects the latest executed proof, while `latest-validate.json` selects validation-only output.
 
-1. **Missing oracle = FAIL** — do not invent silent skips.
-2. **No auto-repair** — do not edit product code or tests inside the dogfood run to force green.
-3. **On FAIL** → re-implement with the report, or re-refine if the AC is wrong (human/PO).
-4. **On INFRA_ERROR** → recover env, re-run dogfood only.
-5. **Judgmental ACs** → advisory; soft `/test` is separate.
-6. Claude and Codex both run the same CLI; ContextRelay may record the report; Headless council is optional after PASS.
+## Exit codes
 
-## ContextRelay (optional)
+- 0 — VALID, PASS, or an INTACT/AUTHENTICATED bundle
+- 1 — INVALID, FAIL, input failure, or invalid bundle
+- 2 — INFRA_ERROR
+- 3 — invalid CLI usage
+- 4 — unexpected internal error
 
-- After run: `record_artifact` with kind `test_report`, path to `summary.md`, status from verdict.
-- Do not `propose_final` when verdict is FAIL or INFRA_ERROR.
-- Idle scanners: treat “claimed complete without dogfood report” as incomplete.
+## Hard rules
 
-## Headless (optional)
+1. Missing oracle is FAIL; never invent a skip.
+2. Do not edit product code or tests during a proof run to force green.
+3. On FAIL, use the report in a separate implementation workflow or re-refine only when the criterion is wrong.
+4. On INFRA_ERROR, recover the environment and start a fresh complete run.
 
-- Not required for CI.
-- Optional: `headless experimental council` on the summary after deterministic PASS.
-- Do not make contained credential discovery a dependency of the gate.
+Judgmental criteria and advisory receipts never change the hard verdict. All deterministic criteria block regardless of severity.
+
+## Signed bundles
+
+`dogfood verify <bundle>` proves internal consistency only. A signature reported as `unverified` is **not** provenance — the public key inside a manifest is not a trust anchor, because whoever regenerates the manifest can regenerate the key. Only `dogfood verify <bundle> --key <key obtained out of band>` establishes origin. Never report a bundle as trusted on the strength of an unchecked signature.
