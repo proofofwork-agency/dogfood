@@ -4,18 +4,25 @@
 
 > ## Status: READY FOR HUMAN REVIEW — not released
 >
-> As of `9db83d0`, every blocker below is cleared except two that are deliberate. `npm test` is
-> 133/133, coverage 91.8%, the tool verifies its own signed bundle, and `npm pack` ships a clean
-> file list. **Nothing has been published, pushed, or tagged.**
+> As of `a2e3727`, every blocker below is cleared. `npm test` is 179/179, the tool verifies its own
+> signed bundle, and `npm pack` ships a clean 62-file list carrying `LICENSE` and `NOTICE`.
+> **Nothing has been published, pushed, or tagged.**
 >
-> Two things are knowingly out of scope for 0.4.0:
+> One item remains, and it is the only one that cannot be front-loaded:
 >
-> 1. **JUnit-XML adapter — deferred to 0.5.0.** It is a new feature, not a fix. 0.4.0 is the
->    integrity-and-signing release; adding a third adapter would widen the blast radius of a release
->    whose whole point is that the existing claims are now true. `docs/junit.md` is deferred with it.
-> 2. **Fork-PR CI validation — cannot be automated.** `test/workflow.test.mjs` pins the invariants
->    offline (no duplicate check names, no `checks: write`, no `${{ }}` in `run:`), but only a real
->    PR from a fork proves the end-to-end behavior. Do it in step 7 before relying on the gate.
+> - **Fork-PR CI validation.** `test/workflow.test.mjs` pins the invariants offline (no duplicate
+>   check names, no `checks: write`, no `${{ }}` in `run:`), but only a real PR from a fork proves
+>   the end-to-end behavior. Do it in step 7 **before** relying on the gate.
+>
+> Two decisions are yours, not blockers:
+>
+> 1. **`0.4.0` or `1.0.0`?** Nothing has ever been published, so no bump is technically required and
+>    the CHANGELOG's 0.4.0 entry covers everything shipped. But the number you publish first is a
+>    semver commitment: `0.x` says the formats may still move, `1.0.0` says they will not without a
+>    major. All four on-disk formats are already at version 1. This is a product call.
+> 2. **Copyright holder.** `LICENSE` and `NOTICE` now name **Proof of Work Agency**, inferred from
+>    the npm scope and GitHub org. Confirm that is the correct legal entity before publishing —
+>    changing it after the fact means amending a published licence grant.
 
 ## Cleared
 
@@ -42,7 +49,12 @@ npm run test:self
 npx playwright install chromium    # once, if not already installed
 npm run test:playwright-fixture
 node --test test/docs.test.mjs     # prose must match the code
+node scripts/check-package-contents.mjs   # LICENSE and NOTICE must ship
 ```
+
+The authoritative profile refuses to certify a dirty tree, so `git status --short` really must be
+clean before the self-run below — otherwise it fails on `initial-tracked-dirty`, which is the gate
+working, not a defect.
 
 Then prove the tool on itself — this is the real gate, not the unit suite:
 
@@ -50,7 +62,7 @@ Then prove the tool on itself — this is the real gate, not the unit suite:
 node bin/dogfood.mjs validate
 node bin/dogfood.mjs run --policy .dogfood/dogfood.policy.yaml
 RUN=$(node -p "JSON.parse(require('fs').readFileSync('artifacts/dogfood/latest.json')).path")
-node bin/dogfood.mjs verify "artifacts/dogfood/$RUN"     # must be VERIFIED
+node bin/dogfood.mjs verify "artifacts/dogfood/$RUN"     # must be INTACT (unsigned = integrity only)
 ```
 
 Then confirm the trust model actually holds. This is the check that decides whether signing means anything:
