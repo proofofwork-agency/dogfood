@@ -56,7 +56,7 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
       const relativeDestination = join(
         "artifacts",
         String(index + 1),
-        `${artifactIndex + 1}-${basename(source)}`,
+        `${artifactIndex + 1}-${safeSegment(basename(source))}`,
       );
       const target = join(destination, relativeDestination);
       mkdirSync(dirname(target), { recursive: true });
@@ -77,6 +77,9 @@ export function collectAdvisoryEvidence(paths, { cwd, artifactDir, criteria = []
 
   return { receipts, errors };
 }
+
+// A copied basename becomes a bundle path, so it may not carry separators or non-portable bytes.
+function safeSegment(value) { return String(value).replace(/[^A-Za-z0-9._-]+/g, "_"); }
 
 function safeWorkspacePath(input, workspace, cwd) {
   const candidate = isAbsolute(input) ? input : resolve(cwd, input);

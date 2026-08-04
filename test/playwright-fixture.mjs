@@ -1,12 +1,41 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = join(root, "examples", "playwright");
 const bin = join(root, "bin", "dogfood.mjs");
+
+// Needs a real Chromium, so this file stays out of the npm test list.
+test("the neutral Playwright fixture passes", () => {
+  const result = run();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(parse(result).verdict, "PASS");
+});
+
+test("a planted product failure fails AC-checkout", () => {
+  const result = run({ DOGFOOD_FIXTURE_PRODUCT_FAILURE: "1" });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  const report = parse(result);
+  assert.equal(report.verdict, "FAIL");
+  assert.equal(
+    report.acceptanceCriteria.find((criterion) => criterion.id === "AC-checkout").verdict,
+    "fail",
+  );
+});
+
+test("latest.json points at the most recent passing run", () => {
+  const result = run();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const report = parse(result);
+  const latest = JSON.parse(
+    readFileSync(join(fixture, "artifacts", "dogfood", "latest.json"), "utf8"),
+  );
+  assert.equal(latest.path, report.runId);
+});
 
 function run(extraEnv = {}) {
   return spawnSync(process.execPath, [bin, "run", "--cwd", fixture, "--json"], {
@@ -22,31 +51,3 @@ function parse(result) {
   assert.ok(result.stdout, result.stderr);
   return JSON.parse(result.stdout);
 }
-
-const passing = run();
-assert.equal(passing.status, 0, passing.stdout + passing.stderr);
-assert.equal(parse(passing).verdict, "PASS");
-
-const plantedFailure = run({ DOGFOOD_FIXTURE_PRODUCT_FAILURE: "1" });
-assert.equal(plantedFailure.status, 1, plantedFailure.stdout + plantedFailure.stderr);
-const failureReport = parse(plantedFailure);
-assert.equal(failureReport.verdict, "FAIL");
-assert.equal(
-  failureReport.acceptanceCriteria.find((criterion) => criterion.id === "AC-checkout").verdict,
-  "fail",
-);
-
-// Leave a genuine PASS as the stable latest report used by CI publication.
-const finalPassing = run();
-assert.equal(finalPassing.status, 0, finalPassing.stdout + finalPassing.stderr);
-const finalReport = parse(finalPassing);
-copyFileSync(
-  join(finalReport.artifactDir, "junit.xml"),
-  join(fixture, "artifacts", "dogfood", "junit.xml"),
-);
-const latest = JSON.parse(
-  readFileSync(join(fixture, "artifacts", "dogfood", "latest.json"), "utf8"),
-);
-assert.equal(latest.path, finalReport.runId);
-
-console.log("neutral Playwright fixture: PASS, planted FAIL, final PASS");

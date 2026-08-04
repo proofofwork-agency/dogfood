@@ -1,9 +1,17 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, rmdirSync } from "node:fs";
 import { arch, platform, release } from "node:os";
 import { join } from "node:path";
 import { ADAPTER_VERSIONS } from "./adapters.mjs";
-import { atomicWriteFile, atomicWriteJson, portableRelative } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson, portableRelative, sweepPendingTemps } from "./files.mjs";
+import { createDocumentRedactor } from "./redact.mjs";
+
+export class BundleIntegrityError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "BundleIntegrityError";
+  }
+}
 
 export function buildReport({
   contract,
@@ -27,6 +35,7 @@ export function buildReport({
   baseline = null,
   metadata = {},
   digests = {},
+  documentRedactor = createDocumentRedactor(),
 }) {
   const hardFails = [
     ...validation.errors.map((message) => ({ kind: "contract", category: "product", message })),
@@ -97,7 +106,7 @@ export function buildReport({
     },
     baseline,
     metadata,
-    commands: commandResults.map(summarizeCommand),
+    commands: commandResults.map((result) => summarizeCommand(result, documentRedactor)),
     acceptanceCriteria: acResults,
     advisoryEvidence: advisoryReceipts,
     hardFails: uniqueHardFails,
@@ -126,11 +135,21 @@ export function writeReport(artifactDir, report) {
 }
 
 export function writeManifest(artifactDir, details) {
+  const swept = sweepPendingTemps(artifactDir);
+  if (swept.length > 0 && process.env.DOGFOOD_DEBUG) {
+    console.error(`Dogfood swept leaked temp files before the manifest: ${swept.join(", ")}`);
+  }
+  pruneEmptyDirectories(artifactDir);
   const checksums = {};
-  for (const file of listFiles(artifactDir)) {
-    const name = portableRelative(artifactDir, file);
-    if (name === "manifest.json") continue;
-    checksums[name] = sha256(readFileSync(file));
+  for (const entry of listBundleEntries(artifactDir)) {
+    if (entry.kind === "hardlink") {
+      throw new BundleIntegrityError(`bundle entry has a second hard link and is not a self-contained record: ${entry.name}`);
+    }
+    if (entry.kind !== "file") {
+      throw new BundleIntegrityError(`bundle contains a non-regular entry that cannot be checksummed: ${entry.name}`);
+    }
+    if (entry.name === "manifest.json") continue;
+    checksums[entry.name] = sha256(readFileSync(entry.path));
   }
   const manifest = {
     version: 3,
@@ -165,10 +184,10 @@ export function writeManifest(artifactDir, details) {
   return manifest;
 }
 
-function summarizeCommand(result) {
+function summarizeCommand(result, documentRedactor) {
   return {
     name: result.name,
-    run: result.definition?.run || result.command,
+    run: documentRedactor.apply(result.definition?.run || result.command),
     adapter: result.definition?.adapter || result.adapter?.adapter || null,
     blocking: result.blocking !== false,
     status: result.status,
@@ -248,7 +267,7 @@ function toMarkdown(report) {
     }
   }
   if (report.baseline) {
-    lines.push("", "## Baseline comparison", "", `Baseline: \`${report.baseline.ref}\``);
+    lines.push("", "## Baseline comparison", "", `Baseline: \`${escapeInline(report.baseline.ref)}\``);
     if (!report.baseline.found) lines.push("", "_No baseline contract was found; this is recorded as first adoption._");
     for (const item of report.baseline.changes || []) lines.push(`- ${item.field}${item.criterionId ? ` for ${item.criterionId}` : ""}${item.reviewRequired ? " — code-owner review required" : ""}`);
   }
@@ -291,14 +310,40 @@ function toJunit(report) {
   return ['<?xml version="1.0" encoding="UTF-8"?>', `<testsuite name="dogfood" tests="${cases.length}" failures="${failures}" errors="${errors}" skipped="${skipped}" time="${(report.durationMs / 1000).toFixed(3)}">`, ...cases.map((testCase) => `  ${testCase}`), "</testsuite>", ""].join("\n");
 }
 
-export function listFiles(root) {
-  const files = [];
+/**
+ * Every bundle entry with the relative name accumulated from the walk itself, sorted by name.
+ * The name is never re-derived from the path, so a filename holding a backslash or padding
+ * whitespace can never alias onto an already-recorded entry. Dirent is lstat-based, so a
+ * symlinked directory is never traversed. A directory with no descendants is its own entry.
+ */
+export function listBundleEntries(root, prefix = "") {
+  const entries = [];
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const path = join(root, entry.name);
-    if (entry.isDirectory()) files.push(...listFiles(path));
-    else if (entry.isFile() && statSync(path).isFile()) files.push(path);
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (!entry.isDirectory()) {
+      entries.push({ path, name, kind: entryKind(entry, path) });
+      continue;
+    }
+    const nested = listBundleEntries(path, name);
+    if (nested.length === 0) entries.push({ path, name, kind: "directory" });
+    else entries.push(...nested);
   }
-  return files.sort();
+  return entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+}
+
+/** Drop directories that hold nothing, bottom-up; a bundle is described entirely by its files. */
+export function pruneEmptyDirectories(root) {
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const path = join(root, entry.name);
+    pruneEmptyDirectories(path);
+    if (readdirSync(path).length === 0) rmdirSync(path);
+  }
+}
+
+export function listFiles(root) {
+  return listBundleEntries(root).filter((entry) => entry.kind === "file").map((entry) => entry.path);
 }
 
 export { portableRelative };
@@ -317,6 +362,13 @@ function deduplicateProblems(problems) {
   });
 }
 
-function escapeCell(value) { return String(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " "); }
-function escapeInline(value) { return String(value).replaceAll("`", "\\`"); }
+function entryKind(entry, path) {
+  if (entry.isSymbolicLink()) return "symlink";
+  if (!entry.isFile()) return "other";
+  // A second hard link makes the bundle's own content editable from outside it.
+  return hardLinkCount(path) > 1 ? "hardlink" : "file";
+}
+function hardLinkCount(path) { try { return lstatSync(path).nlink; } catch { return 1; } }
+function escapeCell(value) { return String(value ?? "").replaceAll("|", "\\|").replace(/[\r\n]+/g, " "); }
+function escapeInline(value) { return String(value).replaceAll("`", "\\`").replace(/[\r\n]+/g, " "); }
 function xml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }

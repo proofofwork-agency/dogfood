@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import test from "node:test";
 import { stringify as stringifyYaml } from "yaml";
 import { ContractInputError } from "../src/load-contract.mjs";
+import { listFiles } from "../src/report.mjs";
 import { runDogfood } from "../src/run.mjs";
+import { verifyBundle } from "../src/verify.mjs";
 import { authoritativePolicy, createProject, git, validContract } from "./helpers.mjs";
 
 test("authoritative policy fails closed on unknown fields and missing files", async () => {
@@ -87,4 +89,66 @@ test("authoritative logs redact secrets and support metadata-only capture", asyn
   git(cwd, ["commit", "-qm", "metadata only"]);
   const metadataOnly = await runDogfood({ cwd, policy: ".dogfood/policy.yaml" });
   assert.equal(readFileSync(join(metadataOnly.artifactDir, "commands", "proof", "stdout.log"), "utf8"), "");
+});
+
+test("logs are redacted with no policy at all", async () => {
+  const contract = validContract({ commands: { proof: { run: "node -e \"console.log(process.env.DOGFOOD_TEST_TOKEN)\"", timeoutMs: 5000, adapter: "exit-code" } } });
+  const cwd = createProject(contract);
+  const previous = process.env.DOGFOOD_TEST_TOKEN;
+  process.env.DOGFOOD_TEST_TOKEN = "environment-secret-value";
+  try {
+    const { report, artifactDir } = await runDogfood({ cwd });
+    assert.equal(report.verdict, "PASS", JSON.stringify(report.hardFails));
+    const log = readFileSync(join(artifactDir, "commands", "proof", "stdout.log"), "utf8");
+    assert.equal(log.includes("environment-secret-value"), false);
+    assert.match(log, /\[REDACTED\]/);
+    const metadata = JSON.parse(readFileSync(join(artifactDir, "commands", "proof", "metadata.json"), "utf8"));
+    assert.equal(metadata.logCapture, "full-redacted");
+    assert.equal(metadata.redactionApplied, true);
+  } finally {
+    if (previous === undefined) delete process.env.DOGFOOD_TEST_TOKEN;
+    else process.env.DOGFOOD_TEST_TOKEN = previous;
+  }
+});
+
+test("a declared literal reaches no file in the bundle, and the bundle still verifies", async () => {
+  const secret = "literalsecret-ZZZZXXXXCCCCVVVV-8888";
+  const contract = validContract({ commands: { proof: { run: `node check.mjs --api-token=${secret}`, timeoutMs: 5000, adapter: "exit-code" } } });
+  const cwd = createProject(contract);
+  writeFileSync(
+    join(cwd, ".dogfood", "policy.yaml"),
+    stringifyYaml(authoritativePolicy({ logs: { capture: "full-redacted", redactEnv: [], redactLiterals: [secret] } })),
+  );
+  git(cwd, ["add", "."]);
+  git(cwd, ["commit", "-qm", "policy with a declared literal"]);
+  const { report, artifactDir } = await runDogfood({ cwd, policy: ".dogfood/policy.yaml" });
+  assert.equal(report.verdict, "PASS", JSON.stringify(report.hardFails));
+  // Declaring a string as a secret is what used to publish it: the policy copy carried the list,
+  // and the command line carried the value into metadata.json, summary.json and the manifest.
+  const leaking = listFiles(artifactDir).filter((file) => readFileSync(file, "utf8").includes(secret));
+  assert.deepEqual(leaking.map((file) => relative(artifactDir, file)), []);
+  assert.match(readFileSync(join(artifactDir, "policy.original.yaml"), "utf8"), /redactLiterals:\n\s+- REDACTED/);
+  // Digests are taken over the published copies, so masking cannot break offline verification.
+  const verification = verifyBundle(artifactDir);
+  assert.equal(verification.ok, true, verification.errors.join("\n"));
+});
+
+test("redaction leaves short numeric secrets alone instead of shredding the log", async () => {
+  const contract = validContract({ commands: { proof: { run: "node -e \"console.log('attempt 1 of 1, 11 checks')\"", timeoutMs: 5000, adapter: "exit-code" } } });
+  const cwd = createProject(contract);
+  writeFileSync(join(cwd, ".dogfood", "policy.yaml"), stringifyYaml(authoritativePolicy()));
+  git(cwd, ["add", ".dogfood/policy.yaml"]);
+  git(cwd, ["commit", "-qm", "policy"]);
+  const previous = process.env.DOGFOOD_TEST_KEY;
+  process.env.DOGFOOD_TEST_KEY = "1";
+  try {
+    const { report, artifactDir } = await runDogfood({ cwd, policy: ".dogfood/policy.yaml" });
+    assert.equal(report.verdict, "PASS", JSON.stringify(report.hardFails));
+    const log = readFileSync(join(artifactDir, "commands", "proof", "stdout.log"), "utf8");
+    assert.match(log, /attempt 1 of 1, 11 checks/);
+    assert.equal(log.includes("[REDACTED]"), false);
+  } finally {
+    if (previous === undefined) delete process.env.DOGFOOD_TEST_KEY;
+    else process.env.DOGFOOD_TEST_KEY = previous;
+  }
 });

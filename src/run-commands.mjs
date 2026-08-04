@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { evaluateAdapter, prepareAdapter } from "./adapters.mjs";
 import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
+import { createDocumentRedactor, createRedactor, redactDeep } from "./redact.mjs";
 import {
   authoritativeRepositoryProblems,
   captureRepositoryState,
@@ -136,7 +137,7 @@ export async function runNamedCommands(
           detail: "command was not started because the proof was interrupted",
           tags: {},
         },
-        evidence: { report: null, evaluation: null },
+        evidence: { report: null, evaluation: null, reportSource: null, reportAccepted: null },
         mutationDetected: false,
         mutationProblems: [],
         repositoryInspectionFailed: false,
@@ -172,6 +173,7 @@ export async function runNamedCommands(
       processResult,
       prepared,
       expectedTagsByCommand[name] || [],
+      logs,
     );
 
     let status = adapter.status;
@@ -196,7 +198,12 @@ export async function runNamedCommands(
       status,
       detail,
       adapter,
-      evidence: { report: prepared.reportFile, evaluation: prepared.evaluationFile },
+      evidence: {
+        report: prepared.reportFile,
+        evaluation: prepared.evaluationFile,
+        reportSource: adapter.reportSource ?? null,
+        reportAccepted: adapter.accepted ?? null,
+      },
       mutationDetected,
       mutationProblems: authoritativeProblems,
       repositoryInspectionFailed,
@@ -212,6 +219,8 @@ export async function runNamedCommands(
 export function writeCommandLogs(artifactDir, results, { logs = null, env = process.env } = {}) {
   const root = join(artifactDir, "commands");
   mkdirSync(root, { recursive: true });
+  // A secret on a command line is published unless the recorded definition is masked too.
+  const documentRedactor = createDocumentRedactor(logs);
   for (const result of results) {
     const directory = join(root, safeSegment(result.name));
     mkdirSync(directory, { recursive: true });
@@ -220,8 +229,8 @@ export function writeCommandLogs(artifactDir, results, { logs = null, env = proc
     atomicWriteFile(join(directory, "stderr.log"), persisted.stderr, "utf8");
     atomicWriteJson(join(directory, "metadata.json"), {
       name: result.name,
-      definition: result.definition || null,
-      command: result.command,
+      definition: redactDeep(result.definition || null, documentRedactor),
+      command: documentRedactor.apply(result.command),
       status: result.status,
       detail: result.detail || null,
       code: result.code,
@@ -248,28 +257,19 @@ export function writeCommandLogs(artifactDir, results, { logs = null, env = proc
 }
 
 export function redactLog(value, logs, env = process.env) {
-  if (!logs) return String(value || "");
-  const literals = new Set(logs.redactLiterals || []);
-  for (const [name, secret] of Object.entries(env)) {
-    if (!secret || !(logs.redactEnv || []).some((pattern) => wildcard(pattern).test(name))) continue;
-    literals.add(String(secret));
-  }
-  let output = String(value || "");
-  for (const literal of [...literals].filter(Boolean).sort((a, b) => b.length - a.length)) {
-    output = output.split(literal).join("[REDACTED]");
-  }
-  return output;
+  return createRedactor(logs, env).apply(value);
 }
 
 function persistedLogs(result, logs, env) {
-  if (logs?.capture === "metadata-only") {
+  const redactor = createRedactor(logs, env);
+  if (redactor.capture === "metadata-only") {
     return { stdout: "", stderr: "", capture: "metadata-only", redactionApplied: true };
   }
   return {
-    stdout: redactLog(result.stdout, logs, env),
-    stderr: redactLog(result.stderr, logs, env),
-    capture: logs ? "full-redacted" : "full",
-    redactionApplied: Boolean(logs),
+    stdout: redactor.apply(result.stdout),
+    stderr: redactor.apply(result.stderr),
+    capture: redactor.capture,
+    redactionApplied: redactor.redactionApplied,
   };
 }
 
@@ -306,11 +306,6 @@ function summarizeRepository(repository) {
 
 function safeSegment(value) {
   return String(value).replace(/[^A-Za-z0-9._-]+/g, "_");
-}
-
-function wildcard(pattern) {
-  const source = String(pattern).replace(/[|\\{}()[\]^$+?.]/g, "\\$&").replaceAll("*", ".*");
-  return new RegExp(`^${source}$`);
 }
 
 function createCapture() {

@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { atomicWriteJson } from "./files.mjs";
+import { atomicWriteFile, atomicWriteJson } from "./files.mjs";
+import { createRedactor, DEFAULT_LOG_POLICY, redactDeep } from "./redact.mjs";
 
 export const ADAPTER_VERSIONS = Object.freeze({
   "exit-code": "1",
@@ -16,6 +17,9 @@ export function prepareAdapter(name, definition, artifactDir) {
     const reportFile = join("evidence", definition.adapter, `${safeName}.report.json`);
     const evaluationFile = join("evidence", definition.adapter, `${safeName}.evaluation.json`);
     const reportPath = join(artifactDir, reportFile);
+    // Clearing the path is the interlock that makes "a report exists" mean "this command wrote it";
+    // without it any earlier command in the same run can pre-plant the evidence.
+    rmSync(reportPath, { force: true });
     return {
       env: { PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath },
       reportPath,
@@ -35,7 +39,8 @@ export function prepareAdapter(name, definition, artifactDir) {
   };
 }
 
-export function evaluateAdapter(definition, processResult, prepared, expectedTags = []) {
+export function evaluateAdapter(definition, processResult, prepared, expectedTags = [], logs = null) {
+  const redactor = createRedactor(logs);
   let evaluation;
   if (definition.adapter === "exit-code") {
     evaluation = evaluateExitCode(processResult);
@@ -45,6 +50,7 @@ export function evaluateAdapter(definition, processResult, prepared, expectedTag
       prepared.reportPath,
       expectedTags,
       prepared.reportFile,
+      redactor,
     );
   } else {
     evaluation = {
@@ -56,8 +62,10 @@ export function evaluateAdapter(definition, processResult, prepared, expectedTag
     };
   }
 
-  atomicWriteJson(prepared.evaluationPath, evaluation);
-  return evaluation;
+  // Report-derived titles and details flow on into summary.json, junit.xml and the console.
+  const redacted = redactDeep(evaluation, redactor);
+  atomicWriteJson(prepared.evaluationPath, redacted);
+  return redacted;
 }
 
 export function evaluateExitCode(processResult) {
@@ -95,12 +103,14 @@ export function evaluatePlaywrightJson(
   reportPath,
   expectedTags = [],
   reportFile = reportPath,
+  redactor = createRedactor(),
 ) {
   const base = {
     adapter: "playwright-json",
     version: ADAPTER_VERSIONS["playwright-json"],
     reportFile,
     reportSource: null,
+    accepted: null,
     tags: {},
   };
 
@@ -116,34 +126,40 @@ export function evaluatePlaywrightJson(
 
   let report;
   if (reportPath && existsSync(reportPath)) {
+    // Only the parse belongs in the try; a failed republish is not an invalid report.
     try {
       report = parsePlaywrightReport(readFileSync(reportPath, "utf8"));
-      // Replace the reporter's completed output through our atomic writer before publication.
-      atomicWriteJson(reportPath, report);
-      base.reportSource = "file";
     } catch (error) {
       return {
         ...base,
+        accepted: false,
         status: "fail",
-        detail: `Playwright JSON report is invalid: ${error.message}`,
+        detail: `Playwright JSON report is invalid: ${describeParseFailure(error)}.`,
       };
     }
+    // Republish through our atomic writer, redacted: titles and errors are attacker- and secret-bearing.
+    atomicWriteFile(reportPath, redactor.apply(`${JSON.stringify(report, null, 2)}\n`), "utf8");
+    base.reportSource = "file";
+    base.accepted = true;
   } else {
+    // Stdout is the command's own output, so it can never be the evidence this adapter exists to demand,
+    // and it is never copied into the bundle: commands/<name>/stdout.log already holds it under the log policy.
+    base.reportSource = "missing";
+    base.accepted = false;
+    const missing = `Playwright JSON report is missing at ${reportFile || "the configured evidence path"}.`;
+    const guidance = "configure the JSON reporter so PLAYWRIGHT_JSON_OUTPUT_FILE is honored";
+    let stdoutShape;
     try {
-      report = parsePlaywrightReport(processResult.stdout);
-      if (!reportPath) throw new Error("Dogfood did not allocate a report destination");
-      atomicWriteJson(reportPath, report);
-      base.reportSource = "stdout-fallback";
+      parsePlaywrightReport(processResult.stdout);
+      stdoutShape = "Stdout parsed as a Playwright report, but stdout is not acceptable evidence";
     } catch (error) {
-      return {
-        ...base,
-        status: "fail",
-        detail:
-          `Playwright JSON report is missing at ${reportFile || "the configured evidence path"}. ` +
-          "Enable the JSON reporter so PLAYWRIGHT_JSON_OUTPUT_FILE is honored; " +
-          `captured stdout was not a standalone Playwright JSON report (${error.message}).`,
-      };
+      stdoutShape = `Stdout is not acceptable evidence either; captured stdout was ${describeParseFailure(error)}`;
     }
+    return {
+      ...base,
+      status: "fail",
+      detail: `${missing} ${stdoutShape} — ${guidance}.`,
+    };
   }
 
   for (const tag of [...new Set(expectedTags)]) {
@@ -272,6 +288,18 @@ function parsePlaywrightReport(value) {
     throw new Error("report has no stats object");
   }
   return report;
+}
+
+// JSON.parse embeds a slice of its input in the message, so details carry a classification only.
+function describeParseFailure(error) {
+  const classification = error?.name === "SyntaxError"
+    ? "not valid JSON"
+    : "not shaped like a Playwright JSON report";
+  return capDetail(createRedactor(DEFAULT_LOG_POLICY).apply(`${classification} (${error?.name || "Error"})`));
+}
+
+function capDetail(value) {
+  return value.length > 120 ? `${value.slice(0, 117)}...` : value;
 }
 
 function safeSegment(value) {

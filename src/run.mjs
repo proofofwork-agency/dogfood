@@ -11,8 +11,9 @@ import { collectAdvisoryEvidence } from "./advisory.mjs";
 import { compareBaseline } from "./baseline.mjs";
 import { collectRuntimeMetadata, inspectBuildSubject } from "./build.mjs";
 import { atomicWriteFile, atomicWriteJson, portableRelative } from "./files.mjs";
-import { findContractPath, loadContractDocument } from "./load-contract.mjs";
+import { findContractPath, loadContractDocument, parseYaml } from "./load-contract.mjs";
 import { defaultPolicyPath, loadPolicyDocument, validateAuthoritativePolicy, validateProtectedPaths } from "./policy.mjs";
+import { createDocumentRedactor, DEFAULT_LOG_POLICY, redactDeep } from "./redact.mjs";
 import { buildReport, writeManifest, writeReport } from "./report.mjs";
 import {
   authoritativeInitialProblems,
@@ -28,15 +29,25 @@ const moduleDir = dirname(fileURLToPath(import.meta.url));
 export const PACKAGE_ROOT = resolve(moduleDir, "..");
 const packageInfo = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"));
 
+// Ordinary, expected setup refusals; they are not internal runner faults.
+export class RunSetupError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RunSetupError";
+  }
+}
+
 export async function runDogfood(options = {}) {
   const cwd = resolve(options.cwd || process.cwd());
   const startedAt = new Date().toISOString();
   const runId = options.runId || `dogfood-${startedAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) throw new Error(`Invalid run id: ${runId}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(runId)) throw new RunSetupError(`Invalid run id: ${runId}`);
 
   const contractPath = findContractPath(cwd, options.contract);
   const { contract, raw: contractRaw } = loadContractDocument(contractPath);
   const policyDocument = loadPolicyDocument(cwd, options.policy);
+  // A policy is never auto-discovered; silently flipping the profile would silently flip verdicts.
+  const ignoredPolicy = !options.policy && existsSync(resolve(cwd, defaultPolicyPath()));
   const authoritative = Boolean(policyDocument.path);
   const validateOnly = Boolean(options.validateOnly);
   const artifactRoot = resolve(cwd, options.artifactDir || "artifacts/dogfood");
@@ -45,27 +56,36 @@ export async function runDogfood(options = {}) {
   try {
     mkdirSync(artifactDir);
   } catch (error) {
-    if (error.code === "EEXIST") throw new Error(`Run directory already exists; refusing to overwrite: ${artifactDir}`);
+    if (error.code === "EEXIST") throw new RunSetupError(`Run directory already exists; refusing to overwrite: ${artifactDir}`);
     throw error;
   }
 
-  const normalizedContract = stringifyYaml(contract, { lineWidth: 0 });
-  atomicWriteFile(join(artifactDir, "contract.original.yaml"), contractRaw, "utf8");
+  // Declaring a string in logs.redactLiterals means "this is a secret", so the copies published
+  // in the bundle mask it too. With no declared literals every published byte is unchanged.
+  const documentRedactor = createDocumentRedactor(policyDocument.policy?.logs || DEFAULT_LOG_POLICY);
+  const publishedContract = documentRedactor.apply(contractRaw);
+  const normalizedContract = stringifyYaml(parseYaml(publishedContract), { lineWidth: 0 });
+  atomicWriteFile(join(artifactDir, "contract.original.yaml"), publishedContract, "utf8");
   atomicWriteFile(join(artifactDir, "contract.snapshot.yaml"), normalizedContract, "utf8");
   let normalizedPolicy = null;
+  let publishedPolicy = null;
   if (authoritative) {
-    normalizedPolicy = stringifyYaml(policyDocument.policy, { lineWidth: 0 });
-    atomicWriteFile(join(artifactDir, "policy.original.yaml"), policyDocument.raw, "utf8");
+    publishedPolicy = documentRedactor.apply(policyDocument.raw);
+    normalizedPolicy = stringifyYaml(parseYaml(publishedPolicy), { lineWidth: 0 });
+    atomicWriteFile(join(artifactDir, "policy.original.yaml"), publishedPolicy, "utf8");
     atomicWriteFile(join(artifactDir, "policy.snapshot.yaml"), normalizedPolicy, "utf8");
   }
 
   const digests = {
-    sourceContract: sha256(contractRaw),
+    sourceContract: sha256(publishedContract),
     normalizedContract: sha256(normalizedContract),
-    sourcePolicy: authoritative ? sha256(policyDocument.raw) : null,
+    sourcePolicy: authoritative ? sha256(publishedPolicy) : null,
     normalizedPolicy: authoritative ? sha256(normalizedPolicy) : null,
   };
   const validation = validateContract(contract);
+  if (ignoredPolicy) {
+    validation.warnings.push(`a policy exists at ${defaultPolicyPath()} but --policy was not supplied; this run used the standard profile`);
+  }
   if (!policyDocument.validation.ok) validation.errors.push(...policyDocument.validation.errors);
   if (authoritative && policyDocument.validation.ok) {
     validation.errors.push(...validateProtectedPaths(cwd, { contract: contractPath, policy: policyDocument.path }).errors);
@@ -113,7 +133,7 @@ export async function runDogfood(options = {}) {
     timeoutMs: options.timeoutMs,
     authoritative,
     allowUntracked: policyDocument.policy?.mutation?.allowUntracked || [],
-    logs: policyDocument.policy?.logs || null,
+    logs: policyDocument.policy?.logs || DEFAULT_LOG_POLICY,
     signal: options.signal,
   };
   let commandResults = [];
@@ -220,6 +240,7 @@ export async function runDogfood(options = {}) {
     baseline,
     metadata,
     digests,
+    documentRedactor,
   });
   writeReport(artifactDir, report);
   const manifest = writeManifest(artifactDir, {
@@ -244,24 +265,39 @@ export async function runDogfood(options = {}) {
     repository: report.repository,
     packageInfo: { name: packageInfo.name, version: packageInfo.version },
     build: { definition: contract?.build || null, identity: buildIdentity, subject: subjectInspection.subject },
-    commandDefinitions: contract?.commands || {},
+    commandDefinitions: redactDeep(contract?.commands || {}, documentRedactor),
     baseline,
     metadata,
     startedAt,
     finishedAt,
   });
 
-  atomicWriteJson(join(artifactRoot, "latest.json"), {
+  // A validate bundle keeps its own pointer so it can never stand in for the proof.
+  writeLatestPointer(join(artifactRoot, report.mode === "run" ? "latest.json" : "latest-validate.json"), {
     version: 3,
     runId,
     path: runId,
     summary: `${runId}/summary.md`,
     manifest: `${runId}/manifest.json`,
+    mode: report.mode,
     verdict: report.verdict,
     validationVerdict: report.validationVerdict,
     proofVerdict: report.proofVerdict,
+    startedAt,
+    finishedAt,
   });
   return { report, manifest, artifactDir, contractPath, policyPath: policyDocument.path, cwd };
+}
+
+/** Concurrent runs finish out of order, so the pointer follows start time, not completion time. */
+function writeLatestPointer(path, pointer) {
+  try {
+    const current = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof current.startedAt === "string" && current.startedAt > pointer.startedAt) return;
+  } catch {
+    // No readable pointer yet, so this run owns it.
+  }
+  atomicWriteJson(path, pointer);
 }
 
 export function exitCodeForVerdict(verdict) {
@@ -351,4 +387,3 @@ function summarizeRepository(repository) {
 
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 export function portablePath(from, to) { return portableRelative(from, to); }
-export { defaultPolicyPath };

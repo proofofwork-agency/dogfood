@@ -4,10 +4,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { stringify as stringifyYaml } from "yaml";
-import { initProject, runDogfood } from "../src/run.mjs";
+import { initProject, PACKAGE_ROOT, runDogfood } from "../src/run.mjs";
 import { migrateContractFile } from "../src/migrate.mjs";
 import { validateContract } from "../src/validate.mjs";
 import { createProject, validContract } from "./helpers.mjs";
+
+const packageVersion = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
 
 test("validate checks mappings without pretending execution", async () => {
   const cwd = createProject();
@@ -35,6 +37,7 @@ test("standard mode preserves excluded-only runs and never auto-loads a policy",
   assert.equal(report.profile, "standard");
   assert.equal(report.verdict, "PASS", JSON.stringify(report.hardFails));
   assert.equal(report.acceptanceCriteria[0].verdict, "excluded");
+  assert.ok(report.validation.warnings.some((warning) => warning.includes("--policy was not supplied")));
 });
 
 test("an empty contract is an ordinary validation FAIL with failing JUnit", async () => {
@@ -71,10 +74,57 @@ test("a passing run emits the complete portable artifact bundle", async () => {
     createHash("sha256").update(readFileSync(join(artifactDir, "summary.json"))).digest("hex"),
   );
   assert.equal(manifest.version, 3);
-  assert.equal(manifest.package.version, "0.3.0");
+  assert.equal(manifest.package.version, packageVersion);
   const latest = JSON.parse(readFileSync(join(cwd, "artifacts", "dogfood", "latest.json")));
   assert.equal(latest.path, report.runId);
   assert.equal(latest.path.startsWith("/"), false);
+});
+
+test("validate keeps its own pointer instead of clobbering the proof pointer", async () => {
+  const cwd = createProject();
+  const proof = await runDogfood({ cwd });
+  assert.equal(proof.report.verdict, "PASS", JSON.stringify(proof.report.hardFails));
+  const validated = await runDogfood({ cwd, validateOnly: true });
+  assert.equal(validated.report.verdict, "VALID");
+  const artifactRoot = join(cwd, "artifacts", "dogfood");
+  const latest = JSON.parse(readFileSync(join(artifactRoot, "latest.json"), "utf8"));
+  const latestValidate = JSON.parse(readFileSync(join(artifactRoot, "latest-validate.json"), "utf8"));
+  assert.equal(latest.runId, proof.report.runId);
+  assert.equal(latest.path, proof.report.runId);
+  assert.equal(latestValidate.runId, validated.report.runId);
+  assert.equal(latestValidate.path, validated.report.runId);
+});
+
+test("the pointer follows the run that started last, not the one that finished last", async () => {
+  const cwd = createProject(validContract());
+  const slow = runDogfood({ cwd, runId: "slow-first" });
+  // A concurrent run that starts later must own the pointer even when it finishes first.
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const fast = await runDogfood({ cwd, runId: "fast-second" });
+  await slow;
+  const latest = JSON.parse(readFileSync(join(cwd, "artifacts", "dogfood", "latest.json"), "utf8"));
+  assert.equal(latest.runId, "fast-second");
+  assert.equal(latest.startedAt, fast.report.startedAt);
+  assert.equal(latest.mode, "run");
+});
+
+test("a Playwright report printed only to stdout is never accepted as evidence", async () => {
+  const contract = validContract({
+    commands: {
+      proof: {
+        run: "node -e \"console.log(JSON.stringify({suites:[],stats:{}}))\"",
+        timeoutMs: 5000,
+        adapter: "playwright-json",
+      },
+    },
+  });
+  contract.oracles.proof = { kind: "playwright", command: "proof", tag: "@dogfood:AC-proof" };
+  const { report, artifactDir } = await runDogfood({ cwd: createProject(contract) });
+  assert.equal(report.verdict, "FAIL");
+  const summary = JSON.parse(readFileSync(join(artifactDir, "summary.json"), "utf8"));
+  const evidence = summary.commands.find((command) => command.name === "proof").evidence;
+  assert.equal(evidence.reportSource, "missing");
+  assert.equal(evidence.reportAccepted, false);
 });
 
 test("command failures and missing Playwright reports cannot pass", async () => {

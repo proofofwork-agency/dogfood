@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ContractInputError, findContractPath } from "../src/load-contract.mjs";
 import { migrateContractFile, MigrationError } from "../src/migrate.mjs";
-import { exitCodeForVerdict, initProject, PACKAGE_ROOT, runDogfood } from "../src/run.mjs";
+import { defaultPolicyPath } from "../src/policy.mjs";
+import { BundleIntegrityError } from "../src/report.mjs";
+import { exitCodeForVerdict, initProject, PACKAGE_ROOT, runDogfood, RunSetupError } from "../src/run.mjs";
 import { verifyBundle } from "../src/verify.mjs";
 
 const COMMANDS = new Set(["help", "version", "init", "validate", "run", "verify", "report", "migrate"]);
@@ -91,6 +94,9 @@ export function parseArgs(argv, currentDirectory = process.cwd()) {
   }
 
   args.cwd = resolve(currentDirectory, args.cwd);
+  if (args.baselineRef !== null && args.baselineRef.startsWith("-")) {
+    throw new CliUsageError("--baseline-ref must not start with '-'");
+  }
   if (args.timeoutMs !== null) {
     const value = Number(args.timeoutMs);
     if (!Number.isSafeInteger(value) || value < 1 || value > 3600000) {
@@ -119,19 +125,20 @@ export async function main(argv = process.argv.slice(2)) {
     return 0;
   }
   if (args.command === "version") {
-    const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"));
-    console.log(pkg.version);
+    console.log(packageVersion());
     return 0;
   }
 
   try {
     if (args.command === "init") {
       const result = await initProject(args.cwd, { force: args.force, authoritative: args.authoritative });
-      console.log(`Initialized Dogfood v0.3 (contract v2) in ${args.cwd}`);
+      console.log(`Initialized Dogfood v${packageVersion()} (contract v2) in ${args.cwd}`);
       console.log(`Contract: ${result.contractPath}`);
       if (result.policyPath) console.log(`Authoritative policy: ${result.policyPath}`);
       for (const skill of result.skillDests) console.log(`Agent skill: ${skill}`);
       console.log("The generated contract is intentionally incomplete; map its oracle before running.");
+      // A policy is never auto-discovered, so the next command has to carry it explicitly.
+      if (result.policyPath) console.log(`Next: dogfood run --policy ${defaultPolicyPath()}`);
       return 0;
     }
 
@@ -190,6 +197,15 @@ export async function main(argv = process.argv.slice(2)) {
       console.error(error.message);
       return 1;
     }
+    if (error instanceof BundleIntegrityError) {
+      console.error(error.message);
+      return 2;
+    }
+    if (error instanceof RunSetupError) {
+      console.error(error.message);
+      if (process.env.DOGFOOD_DEBUG) console.error(error);
+      return 1;
+    }
     if (args.command === "init" && error instanceof Error) {
       console.error(error.message);
       return 1;
@@ -204,7 +220,10 @@ function printLatestReport(cwd) {
   const artifactRoot = resolve(cwd, "artifacts", "dogfood");
   const latestPath = join(artifactRoot, "latest.json");
   if (!existsSync(latestPath)) {
-    console.error("No artifacts/dogfood/latest.json — run `dogfood run` first.");
+    const validated = existsSync(join(artifactRoot, "latest-validate.json"))
+      ? " The last `dogfood validate` wrote artifacts/dogfood/latest-validate.json, which records no executed proof."
+      : "";
+    console.error(`No artifacts/dogfood/latest.json — run \`dogfood run\` first.${validated}`);
     return 1;
   }
   let latest;
@@ -218,6 +237,12 @@ function printLatestReport(cwd) {
     console.error("latest.json does not contain a portable relative run path.");
     return 1;
   }
+  // A VALID/INVALID verdict is only reachable in validate mode, so a pointer written by an
+  // older Dogfood that had no mode field is still recognised and never served as the proof.
+  if (latest.mode === "validate" || ["VALID", "INVALID"].includes(latest.verdict)) {
+    console.error(`artifacts/dogfood/latest.json points at a validate-only bundle (${latest.runId || latest.path}); no proof was executed. Run \`dogfood run\`.`);
+    return 1;
+  }
   const runDirectory = resolve(artifactRoot, latest.path);
   if (!inside(artifactRoot, runDirectory)) {
     console.error("latest.json run path escapes artifacts/dogfood.");
@@ -229,7 +254,34 @@ function printLatestReport(cwd) {
     return 1;
   }
   console.log(readFileSync(summary, "utf8"));
-  return 0;
+  for (const warning of provenanceWarnings(cwd, runDirectory, latest)) console.error(`! ${warning}`);
+  return exitCodeForVerdict(latest.verdict);
+}
+
+/** The pointer survives a refused or crashed run, so a stale proof has to announce itself. */
+function provenanceWarnings(cwd, runDirectory, latest) {
+  const warnings = [];
+  if (latest.finishedAt) warnings.push(`This proof finished at ${latest.finishedAt}; it is not re-executed by \`dogfood report\`.`);
+  const current = gitHead(cwd);
+  const proven = provenHead(runDirectory);
+  if (current && proven && current !== proven) {
+    warnings.push(`Stale: the proof ran at commit ${proven}, but the workspace is now at ${current}. Start a fresh \`dogfood run\`.`);
+  }
+  return warnings;
+}
+
+function gitHead(cwd) {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" });
+  return result.status === 0 ? String(result.stdout || "").trim() : null;
+}
+
+function provenHead(runDirectory) {
+  try {
+    const summary = JSON.parse(readFileSync(join(runDirectory, "summary.json"), "utf8"));
+    return summary.repository?.after?.head || summary.repository?.before?.head || null;
+  } catch {
+    return null;
+  }
 }
 
 function printResult(report, artifactDir, contractPath) {
@@ -299,6 +351,10 @@ Exit codes:
 
 Missing oracle = FAIL. Verification never repairs product code or tests.
 `);
+}
+
+function packageVersion() {
+  return JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8")).version;
 }
 
 function inside(root, candidate) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { stringify as stringifyYaml } from "yaml";
@@ -67,6 +67,36 @@ test("baseline records additive and code-owner-review changes without guessing i
   assert.equal(report.verdict, "VALID", report.validation.errors.join("\n"));
   assert.ok(report.baseline.changes.some((change) => change.type === "criterion-added"));
   assert.ok(report.baseline.changes.some((change) => change.field === "command.run" && change.reviewRequired));
+});
+
+test("a symbolic baseline ref is resolved to an object id before Git reads the contract", async () => {
+  const cwd = baselineProject(validContract());
+  const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  const { report } = await runDogfood({ cwd, policy: ".dogfood/policy.yaml", baselineRef: branch, validateOnly: true });
+  assert.equal(report.verdict, "VALID", report.validation.errors.join("\n"));
+  assert.equal(report.baseline.ref, branch);
+  assert.equal(report.baseline.found, true);
+  assert.match(report.baseline.resolvedRef, /^[0-9a-f]{40}$/);
+});
+
+test("a SHA-256 repository resolves its baseline instead of looking unresolvable", async () => {
+  const cwd = baselineProject(validContract());
+  if (git(cwd, ["rev-parse", "--show-object-format"]).trim() !== "sha256") return;
+  const { report } = await runDogfood({ cwd, policy: ".dogfood/policy.yaml", baselineRef: "HEAD", validateOnly: true });
+  assert.equal(report.verdict, "VALID", report.validation.errors.join("\n"));
+  assert.match(report.baseline.resolvedRef, /^[0-9a-f]{64}$/);
+});
+
+test("a control character in the baseline ref is refused before it reaches Git or the report", async () => {
+  const cwd = baselineProject(validContract());
+  const ref = "main\n\n## Verdict\n\n**PASS** — forged";
+  const { report, artifactDir } = await runDogfood({ cwd, policy: ".dogfood/policy.yaml", baselineRef: ref, validateOnly: true });
+  assert.equal(report.verdict, "INVALID");
+  assert.deepEqual(report.validation.errors, ["baseline ref contains control characters"]);
+  // The ref is still echoed into the checksummed Markdown, so it may not break out of its own line.
+  const lines = readFileSync(join(artifactDir, "summary.md"), "utf8").split("\n");
+  assert.equal(lines.some((line) => line.trim() === "## Verdict" || line.startsWith("**PASS**")), false);
+  assert.ok(lines.includes("Baseline: `main ## Verdict **PASS** — forged`"), lines.join("\n"));
 });
 
 test("missing baseline contract is a first-adoption warning", async () => {

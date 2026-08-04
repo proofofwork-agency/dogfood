@@ -10,6 +10,12 @@ on:
     # Optional drift detector (UTC). PRs and merge queues remain the merge gate.
     - cron: "17 2 * * *"
 
+# Only superseded pull-request runs are cancelled; merge_group and push:main runs
+# are the merge gate and must always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unit:
     name: unit / ${{ matrix.os }} / node-${{ matrix.node }}
@@ -21,6 +27,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         node: [20, 24]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -39,6 +46,7 @@ jobs:
       matrix:
         node: [20, 24]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -54,6 +62,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,18 +81,85 @@ jobs:
           MERGE_BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           if [ -n "$PR_BASE" ]; then
-            echo "args=--baseline-ref $PR_BASE" >> "$GITHUB_OUTPUT"
+            echo "ref=$PR_BASE" >> "$GITHUB_OUTPUT"
           elif [ -n "$MERGE_BASE" ]; then
-            echo "args=--baseline-ref $MERGE_BASE" >> "$GITHUB_OUTPUT"
+            echo "ref=$MERGE_BASE" >> "$GITHUB_OUTPUT"
           else
-            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "ref=" >> "$GITHUB_OUTPUT"
+            echo "::notice::No PR or merge-queue base; baseline regression rules are not applied on this event"
           fi
       - name: Validate authoritative contract
-        run: node bin/dogfood.mjs validate --policy .dogfood/dogfood.policy.yaml ${{ steps.baseline.outputs.args }}
+        shell: bash
+        env:
+          BASE_REF: ${{ steps.baseline.outputs.ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            node bin/dogfood.mjs validate --policy .dogfood/dogfood.policy.yaml --baseline-ref "$BASE_REF"
+          else
+            node bin/dogfood.mjs validate --policy .dogfood/dogfood.policy.yaml
+          fi
       - name: Run authoritative proof
-        run: node bin/dogfood.mjs run --policy .dogfood/dogfood.policy.yaml ${{ steps.baseline.outputs.args }}
+        shell: bash
+        env:
+          BASE_REF: ${{ steps.baseline.outputs.ref }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            node bin/dogfood.mjs run --policy .dogfood/dogfood.policy.yaml --baseline-ref "$BASE_REF"
+          else
+            node bin/dogfood.mjs run --policy .dogfood/dogfood.policy.yaml
+          fi
+      # The manifest, not the pointer, decides whether this bundle executed a proof at all.
       - name: Verify generated bundle
-        run: node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('artifacts/dogfood/latest.json')); require('child_process').execFileSync(process.execPath,['bin/dogfood.mjs','verify','artifacts/dogfood/'+p.path],{stdio:'inherit'})"
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const pointer = JSON.parse(fs.readFileSync("artifacts/dogfood/latest.json", "utf8"));
+            const bundle = "artifacts/dogfood/" + pointer.path;
+            const manifest = JSON.parse(fs.readFileSync(bundle + "/manifest.json", "utf8"));
+            if (manifest.mode !== "run") throw new Error("latest.json points at a " + manifest.mode + " bundle, which executes no proof");
+            require("node:child_process").execFileSync(process.execPath, ["bin/dogfood.mjs", "verify", bundle], { stdio: "inherit" });
+          '
+      # Renders JUnit into the run summary with zero permissions, so fork pull
+      # requests reach the same gate as branch pull requests.
+      - name: Publish JUnit summary
+        if: always()
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const target = process.env.GITHUB_STEP_SUMMARY;
+            // The catch handler calls write() too, so a failing append must never escape it.
+            const write = (text) => { try { if (target) fs.appendFileSync(target, text); } catch {} };
+            const attr = (tag, key) => { const found = tag.match(new RegExp("\\b" + key + "=\"([^\"]{0,4096})\"")); return found ? found[1] : ""; };
+            const decode = (value) => value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", "\"").replaceAll("&amp;", "&");
+            // A suite or test name is arbitrary text; unescaped it breaks the row and injects markdown.
+            const cell = (value) => decode(value).replace(/[|`\\]/g, "\\$&").replace(/[\r\n]+/g, " ");
+            try {
+              const root = "artifacts/dogfood";
+              const files = !fs.existsSync(root) ? [] : fs.readdirSync(root, { withFileTypes: true })
+                .filter((entry) => entry.isDirectory())
+                .map((entry) => path.join(root, entry.name, "junit.xml"))
+                .filter((file) => fs.existsSync(file));
+              if (files.length === 0) { write("### dogfood JUnit\n\nNo junit.xml found under artifacts/dogfood/.\n"); process.exit(0); }
+              const rows = [];
+              const failed = [];
+              for (const file of files) {
+                const xml = fs.readFileSync(file, "utf8");
+                for (const tag of xml.match(/<testsuite\b[^>]{0,4096}>/g) || []) rows.push("| " + [file, attr(tag, "name"), attr(tag, "tests"), attr(tag, "failures"), attr(tag, "errors"), attr(tag, "skipped"), attr(tag, "time")].map(cell).join(" | ") + " |");
+                // Both spans are bounded so a malformed report cannot backtrack quadratically.
+                for (const [, open, , body] of xml.matchAll(/<testcase\b([^>]{0,4096})(\/>|>([\s\S]{0,65536}?)<\/testcase>)/g)) {
+                  if (!/<(failure|error)\b/.test(body || "")) continue;
+                  failed.push("- `" + cell(attr(open, "classname")) + " / " + cell(attr(open, "name")) + "` — " + cell(attr(body, "message") || "failed"));
+                }
+              }
+              write(["### dogfood JUnit", "", "| bundle | suite | tests | failures | errors | skipped | time (s) |", "| --- | --- | ---: | ---: | ---: | ---: | ---: |", ...rows, ""].join("\n"));
+              if (failed.length > 0) write(["", "**Failing cases**", "", ...failed, ""].join("\n"));
+            } catch (error) {
+              write("### dogfood JUnit\n\nCould not summarize junit.xml: " + error.message + "\n");
+            }
+          '
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -92,39 +168,18 @@ jobs:
           path: artifacts/dogfood/
           if-no-files-found: error
 
-  junit:
-    name: publish JUnit
-    if: always()
-    needs: [authoritative]
-    permissions:
-      contents: read
-      checks: write
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: dogfood-evidence
-          path: artifacts/dogfood
-      - uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
-        with:
-          name: dogfood / prove-it
-          path: artifacts/dogfood/**/junit.xml
-          reporter: java-junit
-          fail-on-error: "false"
-
   prove-it:
     name: dogfood / prove-it
     if: always()
-    needs: [unit, playwright-fixture, authoritative, junit]
+    needs: [unit, playwright-fixture, authoritative]
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require every proof job
         env:
           UNIT: ${{ needs.unit.result }}
           PLAYWRIGHT: ${{ needs.playwright-fixture.result }}
           AUTHORITATIVE: ${{ needs.authoritative.result }}
-          JUNIT: ${{ needs.junit.result }}
-        run: test "$UNIT" = success && test "$PLAYWRIGHT" = success && test "$AUTHORITATIVE" = success && test "$JUNIT" = success
+        run: test "$UNIT" = success && test "$PLAYWRIGHT" = success && test "$AUTHORITATIVE" = success

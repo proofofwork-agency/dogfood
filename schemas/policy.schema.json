@@ -58,7 +58,11 @@
       "additionalProperties": false,
       "required": ["capture", "redactEnv", "redactLiterals"],
       "properties": {
-        "capture": { "type": "string", "enum": ["full-redacted", "metadata-only"] },
+        "capture": {
+          "type": "string",
+          "enum": ["full-redacted", "metadata-only", "full"],
+          "description": "full-redacted keeps logs with matched env values and literals replaced; metadata-only writes no log bodies; full is a discouraged opt-out that disables redaction entirely and must not be used in CI, where the bundle is uploaded as a build artifact."
+        },
         "redactEnv": {
           "type": "array",
           "uniqueItems": true,

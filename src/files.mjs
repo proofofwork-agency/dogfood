@@ -11,25 +11,43 @@ import {
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 
+// Temp files that exist on disk but have not been renamed or removed yet.
+const pendingTemps = new Set();
+
 export function atomicWriteFile(path, value, encoding = undefined) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   let descriptor;
+  pendingTemps.add(temporary);
   try {
     descriptor = openSync(temporary, "wx", 0o600);
     writeFileSync(descriptor, value, encoding);
     closeSync(descriptor);
     descriptor = undefined;
     renameSync(temporary, path);
+    pendingTemps.delete(temporary);
   } catch (error) {
     if (descriptor !== undefined) closeSync(descriptor);
     rmSync(temporary, { force: true });
+    pendingTemps.delete(temporary);
     throw error;
   }
 }
 
 export function atomicWriteJson(path, value) {
   atomicWriteFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+/** Remove still-pending temp files under root; a non-empty result means a writer leaked one. */
+export function sweepPendingTemps(root) {
+  const swept = [];
+  for (const temporary of pendingTemps) {
+    if (!isPathInside(root, temporary)) continue;
+    rmSync(temporary, { force: true });
+    pendingTemps.delete(temporary);
+    swept.push(temporary);
+  }
+  return swept;
 }
 
 /** Convert Git-for-Windows / MSYS absolute paths into Node-usable paths. */

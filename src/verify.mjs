@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { portableRelative } from "./files.mjs";
-import { listFiles, sha256 } from "./report.mjs";
+import { listBundleEntries, sha256 } from "./report.mjs";
 
 const NOTICE = "Integrity verification proves internal consistency, not cryptographic provenance. A malicious actor can regenerate this unsigned manifest; signing is deferred.";
 
@@ -48,11 +47,25 @@ export function verifyBundle(bundleDir, { subject = null, cwd = process.cwd() } 
     const actual = sha256(readFileSync(path));
     if (actual !== expected) errors.push(`checksum mismatch: ${name}`);
   }
-  for (const file of listFiles(directory)) {
-    const name = portableRelative(directory, file);
-    if (name !== "manifest.json" && !recorded.has(name) && !name.includes(".tmp-")) {
-      errors.push(`unrecorded file is present in bundle: ${name}`);
+  let entries = [];
+  try {
+    entries = listBundleEntries(directory);
+  } catch (error) {
+    errors.push(`bundle contents could not be enumerated: ${error.message}`);
+  }
+  for (const entry of entries) {
+    if (entry.kind === "directory") {
+      errors.push(`unrecorded directory is present in bundle: ${entry.name}`);
+      continue;
     }
+    if (entry.kind === "hardlink") {
+      // An archiver may legitimately hardlink a stored bundle, so this cannot be an error.
+      warnings.push(`recorded file has a second hard link, so its content can change from outside the bundle: ${entry.name}`);
+    } else if (entry.kind !== "file") {
+      errors.push(`bundle contains a non-regular file: ${entry.name}`);
+      continue;
+    }
+    if (entry.name !== "manifest.json" && !recorded.has(entry.name)) errors.push(`unrecorded file is present in bundle: ${entry.name}`);
   }
 
   verifyNormalizedDocument(directory, manifest.contract, "contract", errors);

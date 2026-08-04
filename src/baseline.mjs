@@ -8,11 +8,18 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
   if (!ref) return null;
   const result = {
     ref,
+    resolvedRef: null,
     found: false,
     errors: [],
     warnings: [],
     changes: [],
   };
+  // A control character cannot be part of a ref name; it only reaches spawnSync as a raw
+  // TypeError and injects newlines into the Markdown evidence, so it is refused unquoted.
+  if (hasControlCharacter(String(ref))) {
+    result.errors.push("baseline ref contains control characters");
+    return result;
+  }
   const rootResult = git(cwd, ["rev-parse", "--show-toplevel"]);
   if (rootResult.status !== 0) {
     result.errors.push(`could not locate Git root for baseline ${ref}: ${clean(rootResult.stderr)}`);
@@ -24,12 +31,16 @@ export function compareBaseline({ cwd, contractPath, contract, ref, policy }) {
     return result;
   }
   const rel = portableRelative(root, contractPath);
-  const commitResult = git(root, ["rev-parse", "--verify", `${ref}^{commit}`]);
-  if (commitResult.status !== 0) {
+  const commitResult = git(root, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]);
+  const resolvedRef = String(commitResult.stdout || "").trim();
+  // Only the resolved object id is ever handed to `git show`; a user string could be read as an option.
+  // Both object formats are accepted, so a SHA-256 repository is not rejected as unresolvable.
+  if (commitResult.status !== 0 || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(resolvedRef)) {
     result.errors.push(`baseline ref does not resolve to a commit: ${ref}`);
     return result;
   }
-  const source = git(root, ["show", `${ref}:${rel}`], 10 * 1024 * 1024);
+  result.resolvedRef = resolvedRef;
+  const source = git(root, ["show", `${resolvedRef}:${rel}`], 10 * 1024 * 1024);
   if (source.status !== 0) {
     result.warnings.push(`baseline contract is absent at ${ref}:${rel}; treating this as first adoption`);
     return result;
@@ -143,6 +154,8 @@ function change(type, criterionId, field, before, after, reviewRequired = false)
 function git(cwd, args, maxBuffer = 1024 * 1024) {
   return spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer });
 }
+
+function hasControlCharacter(value) { return [...value].some((character) => character.codePointAt(0) < 0x20 || character.codePointAt(0) === 0x7f); }
 
 function clean(value) {
   return String(value || "").trim().split("\n").filter(Boolean).at(-1) || "Git command failed";
