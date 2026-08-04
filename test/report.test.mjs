@@ -40,7 +40,7 @@ test("writeManifest checksums every regular file except manifest.json", () => {
     writeFileSync(join(root, "manifest.json"), "{}\n", "utf8");
     const manifest = writeManifest(root, {});
     assert.deepEqual(Object.keys(manifest.checksums).sort(), ["commands/proof/stdout.log", "summary.json"]);
-    assert.equal(JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")).version, 3);
+    assert.equal(JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")).version, 4);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

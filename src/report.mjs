@@ -93,7 +93,7 @@ export function buildReport({
   const proofVerdict = validateOnly || !validation.ok ? "NOT_RUN" : classifyVerdict(uniqueHardFails);
   const verdict = validateOnly ? validationVerdict : validation.ok ? proofVerdict : "FAIL";
   return {
-    version: 3,
+    version: 4,
     runId,
     mode: validateOnly ? "validate" : "run",
     profile: authoritative ? "authoritative" : "standard",
@@ -144,7 +144,7 @@ export function writeReport(artifactDir, report) {
   atomicWriteJson(join(artifactDir, "summary.json"), report);
   atomicWriteFile(join(artifactDir, "summary.md"), toMarkdown(report), "utf8");
   atomicWriteJson(join(artifactDir, "matrix.json"), {
-    version: 3,
+    version: 4,
     project: report.project,
     runId: report.runId,
     verdict: report.verdict,
@@ -173,7 +173,7 @@ export function writeManifest(artifactDir, details) {
     checksums[entry.name] = sha256(readFileSync(entry.path));
   }
   const manifest = {
-    version: 3,
+    version: 4,
     checksumAlgorithm: "sha256",
     runId: details.runId,
     mode: details.mode,
@@ -199,7 +199,10 @@ export function writeManifest(artifactDir, details) {
     startedAt: details.startedAt,
     finishedAt: details.finishedAt,
     checksums,
-    integrityNotice: "Checksums prove internal consistency, not provenance. A malicious actor can regenerate this unsigned manifest; signing is deferred.",
+    signing: details.signing || null,
+    integrityNotice: details.signing
+      ? "Checksums prove internal consistency. The detached signature proves provenance only when verified against a public key obtained out of band (dogfood verify --key); the key recorded here is not a trust anchor."
+      : "Checksums prove internal consistency, not provenance. A malicious actor can regenerate this unsigned manifest. Sign it with dogfood run --sign to bind it to a key.",
   };
   atomicWriteJson(join(artifactDir, "manifest.json"), manifest);
   return manifest;

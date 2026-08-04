@@ -73,7 +73,7 @@ test("a passing run emits the complete portable artifact bundle", async () => {
     manifest.checksums["summary.json"],
     createHash("sha256").update(readFileSync(join(artifactDir, "summary.json"))).digest("hex"),
   );
-  assert.equal(manifest.version, 3);
+  assert.equal(manifest.version, 4);
   assert.equal(manifest.package.version, packageVersion);
   const latest = JSON.parse(readFileSync(join(cwd, "artifacts", "dogfood", "latest.json")));
   assert.equal(latest.path, report.runId);

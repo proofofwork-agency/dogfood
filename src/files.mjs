@@ -20,13 +20,13 @@ const pendingTemps = new Set();
  * the rename so a crash cannot leave a named-but-empty file. The mode is left to the umask: a
  * bundle is evidence to be collected, and 0600 locks out CI collectors running as another user.
  */
-export function atomicWriteFile(path, value, encoding = undefined) {
+export function atomicWriteFile(path, value, encoding = undefined, { mode } = {}) {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   let descriptor;
   pendingTemps.add(temporary);
   try {
-    descriptor = openSync(temporary, "wx");
+    descriptor = mode === undefined ? openSync(temporary, "wx") : openSync(temporary, "wx", mode);
     writeFileSync(descriptor, value, encoding);
     fsyncSync(descriptor);
     closeSync(descriptor);

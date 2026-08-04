@@ -8,17 +8,21 @@ import { migrateContractFile, MigrationError } from "../src/migrate.mjs";
 import { defaultPolicyPath } from "../src/policy.mjs";
 import { BundleIntegrityError } from "../src/report.mjs";
 import { exitCodeForVerdict, initProject, PACKAGE_ROOT, runDogfood, RunSetupError } from "../src/run.mjs";
+import { SigningError, writeKeyPair } from "../src/sign.mjs";
 import { verifyBundle } from "../src/verify.mjs";
 
-const COMMANDS = new Set(["help", "version", "init", "validate", "run", "verify", "report", "migrate"]);
+const COMMANDS = new Set(["help", "version", "init", "validate", "run", "verify", "report", "migrate", "keygen"]);
 const OPTION_SPECS = {
   "--cwd": { key: "cwd", value: true, commands: ["init", "validate", "run", "report", "migrate"] },
   "--contract": { key: "contract", value: true, commands: ["validate", "run", "migrate"] },
   "--policy": { key: "policy", value: true, commands: ["validate", "run"] },
   "--baseline-ref": { key: "baselineRef", value: true, commands: ["validate", "run"] },
   "--subject": { key: "subject", value: true, commands: ["verify"] },
+  "--sign": { key: "sign", value: true, commands: ["run"] },
+  "--key": { key: "key", value: true, commands: ["verify"] },
+  "--out": { key: "out", value: true, commands: ["keygen"] },
   "--json": { key: "json", value: false, commands: ["validate", "run", "verify"] },
-  "--force": { key: "force", value: false, commands: ["init"] },
+  "--force": { key: "force", value: false, commands: ["init", "keygen"] },
   "--authoritative": { key: "authoritative", value: false, commands: ["init"] },
   "--write": { key: "write", value: false, commands: ["migrate"] },
   "--timeout-ms": { key: "timeoutMs", value: true, commands: ["run"] },
@@ -53,6 +57,9 @@ export function parseArgs(argv, currentDirectory = process.cwd()) {
     write: false,
     timeoutMs: null,
     evidence: [],
+    sign: null,
+    key: null,
+    out: null,
   };
   const seen = new Set();
   while (rest.length > 0) {
@@ -158,8 +165,18 @@ export async function main(argv = process.argv.slice(2)) {
       return printLatestReport(args.cwd);
     }
 
+    if (args.command === "keygen") {
+      const target = resolve(args.cwd || process.cwd(), args.out || ".");
+      const { privatePath, publicPath, keyId } = writeKeyPair(target, { force: args.force });
+      console.log(`Private key: ${privatePath} (mode 0600 — never commit this)`);
+      console.log(`Public key:  ${publicPath}`);
+      console.log(`Key id:      ${keyId}`);
+      console.log("Distribute the public key out of band. A key read from inside a bundle proves nothing.");
+      return 0;
+    }
+
     if (args.command === "verify") {
-      const verification = verifyBundle(args.bundleDir, { subject: args.subject });
+      const verification = verifyBundle(args.bundleDir, { subject: args.subject, key: args.key });
       if (args.json) console.log(JSON.stringify(verification, null, 2));
       else printVerification(verification);
       return verification.ok ? 0 : 1;
@@ -179,6 +196,7 @@ export async function main(argv = process.argv.slice(2)) {
         validateOnly: args.command === "validate",
         timeoutMs: args.timeoutMs,
         evidence: args.evidence,
+        sign: args.sign,
         signal: abortController.signal,
       });
     } finally {
@@ -194,6 +212,10 @@ export async function main(argv = process.argv.slice(2)) {
     return exitCodeForVerdict(report.verdict);
   } catch (error) {
     if (error instanceof ContractInputError || error instanceof MigrationError) {
+      console.error(error.message);
+      return 1;
+    }
+    if (error instanceof SigningError) {
       console.error(error.message);
       return 1;
     }

@@ -14,6 +14,7 @@ The package exposes the same executable as `dogfood` and `pow-dogfood`. Examples
 | `verify` | Verifies one existing bundle. It does not execute the contract. |
 | `report` | Prints the `summary.md` selected by `latest.json` and returns the recorded verdict's exit code. |
 | `migrate` | Converts a version 1 contract to version 2. Without `--write`, YAML is printed; with it, the source is replaced after a timestamped backup is created. |
+| `keygen` | Writes an ed25519 signing pair into `--out`. The private key is created mode `0600`. Existing keys are preserved unless `--force` is supplied. |
 
 ## Options
 
@@ -30,6 +31,9 @@ The package exposes the same executable as `dogfood` and `pow-dogfood`. Examples
 | `--write` | no | `migrate` | Replaces the v1 contract after writing a backup. |
 | `--timeout-ms` | yes | `run` | Applies a 1–3,600,000 ms ceiling to every command. The effective timeout is `Math.min` of this value and the command's declared `timeoutMs`. |
 | `--evidence` | yes | `run` | Adds one advisory receipt. The flag is repeatable. |
+| `--sign` | yes | `run` | Signs the manifest with this ed25519 private key and writes a detached `manifest.sig`. |
+| `--key` | yes | `verify` | Checks the detached signature against this public key. **Only this establishes provenance** — see [signing](signing.md). |
+| `--out` | yes | `keygen` | Directory to write `dogfood-signing-key` and `dogfood-signing-key.pub` into. |
 
 Each non-repeatable option may appear once. `dogfood verify` also requires the positional `<bundle-dir>`.
 

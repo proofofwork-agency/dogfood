@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify as stringifyYaml } from "yaml";
 import { collectAdvisoryEvidence } from "./advisory.mjs";
+import { loadPrivateKey, signingBlock, signManifest } from "./sign.mjs";
 import { compareBaseline } from "./baseline.mjs";
 import { collectRuntimeMetadata, inspectBuildSubject } from "./build.mjs";
 import { atomicWriteFile, atomicWriteJson, portableRelative } from "./files.mjs";
@@ -51,6 +52,7 @@ export async function runDogfood(options = {}) {
   const ignoredPolicy = !options.policy && existsSync(resolve(cwd, defaultPolicyPath()));
   const authoritative = Boolean(policyDocument.path);
   const validateOnly = Boolean(options.validateOnly);
+  const signingKey = options.sign ? loadPrivateKey(resolve(cwd, options.sign)) : null;
   const artifactRoot = resolve(cwd, options.artifactDir || "artifacts/dogfood");
   const artifactDir = join(artifactRoot, runId);
   mkdirSync(artifactRoot, { recursive: true });
@@ -282,7 +284,11 @@ export async function runDogfood(options = {}) {
     metadata,
     startedAt,
     finishedAt,
+    signing: signingKey ? signingBlock(signingKey) : null,
   });
+
+  // The signature is detached because it cannot live inside the bytes it signs.
+  if (signingKey) signManifest(artifactDir, signingKey);
 
   // A validate bundle keeps its own pointer so it can never stand in for the proof.
   writeLatestPointer(join(artifactRoot, report.mode === "run" ? "latest.json" : "latest-validate.json"), {
