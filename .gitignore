@@ -2,6 +2,7 @@ node_modules/
 artifacts/
 examples/*/artifacts/
 examples/*/test-results/
+examples/junit/reports/
 *.tgz
 .contextrelay/
 DOGFOOD-E2E-PANEL-*.md

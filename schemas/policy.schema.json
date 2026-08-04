@@ -18,7 +18,7 @@
         "requiredGates": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "https://proofofwork.agency/schemas/dogfood-contract-v2.json#/$defs/name" }
+          "items": { "$ref": "https://proofofwork.agency/schemas/dogfood-contract-v1.json#/$defs/name" }
         }
       }
     },

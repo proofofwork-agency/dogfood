@@ -1,3 +1,5 @@
+import { describeJunitSelector, junitSelectorKey } from "./junit.mjs";
+
 export function scoreAcceptanceCriteria(
   contract,
   commandResults,
@@ -78,13 +80,22 @@ export function scoreAcceptanceCriteria(
       };
     }
     if (command.status !== "pass") {
-      const tagDetail = oracle.kind === "playwright"
-        ? command.adapter?.tags?.[oracle.tag]?.detail
-        : null;
+      // The selector's own detail is the reason only when the selector is what failed. A criterion
+      // whose test passed inside a command that failed must not be reported as "passed" beside a
+      // fail verdict: a runner that exits non-zero may have written a partial report, and no
+      // adapter can tell "one test failed" from "the runner broke" without runner-specific
+      // knowledge it deliberately does not have. So it fails closed, and says why.
+      const selector = selectorResult(command, oracle);
+      if (selector && selector.status !== "pass") {
+        return { ...base, verdict: "fail", detail: selector.detail };
+      }
+      const reason = command.detail || "the command did not pass";
       return {
         ...base,
         verdict: "fail",
-        detail: tagDetail || command.detail || `oracle command "${oracle.command}" failed`,
+        detail: selector
+          ? `oracle command "${oracle.command}" did not pass, so its report cannot prove this criterion even though the selector matched: ${reason}`
+          : reason,
       };
     }
 
@@ -101,6 +112,22 @@ export function scoreAcceptanceCriteria(
         ...base,
         verdict: "pass",
         detail: tagResult.detail,
+      };
+    }
+
+    if (oracle.kind === "junit") {
+      const caseResult = command.adapter?.testcases?.[junitSelectorKey(oracle.testcase)];
+      if (!caseResult || caseResult.status !== "pass") {
+        return {
+          ...base,
+          verdict: "fail",
+          detail: caseResult?.detail || `JUnit testcase ${describeJunitSelector(oracle.testcase)} was not evaluated`,
+        };
+      }
+      return {
+        ...base,
+        verdict: "pass",
+        detail: caseResult.detail,
       };
     }
 
@@ -138,4 +165,25 @@ export function expectedPlaywrightTags(contract) {
     tags[command] = [...new Set(values)];
   }
   return tags;
+}
+
+export function expectedJunitCases(contract) {
+  const cases = Object.create(null);
+  for (const criterion of contract.acceptanceCriteria || []) {
+    if (criterion.class !== "deterministic") continue;
+    const oracle = contract.oracles?.[criterion.oracle];
+    if (oracle?.kind !== "junit") continue;
+    cases[oracle.command] ||= new Map();
+    cases[oracle.command].set(junitSelectorKey(oracle.testcase), oracle.testcase);
+  }
+  for (const [command, selectors] of Object.entries(cases)) {
+    cases[command] = [...selectors.values()];
+  }
+  return cases;
+}
+
+function selectorResult(command, oracle) {
+  if (oracle.kind === "playwright") return command.adapter?.tags?.[oracle.tag];
+  if (oracle.kind === "junit") return command.adapter?.testcases?.[junitSelectorKey(oracle.testcase)];
+  return null;
 }

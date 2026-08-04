@@ -24,6 +24,23 @@ node ../../bin/dogfood.mjs run
 
 Observed result: exit 1 and `FAIL` during validation. No proof command is executed. This fixture pins the rule that missing oracle is a failure, never a skip.
 
+## Named testcases from JUnit XML
+
+[examples/junit](https://github.com/proofofwork-agency/dogfood/tree/main/examples/junit) binds two criteria to two named testcases. A small Node script stands in for pytest, Vitest or gotestsum, so the example needs no Python, Go or JVM toolchain — JUnit XML is all any of them contributes to a proof.
+
+```bash
+cd examples/junit
+node ../../bin/dogfood.mjs run
+```
+
+Observed result: exit 0 and `PASS`; both criteria are proven by name. Break one test and only its criterion reports the failing testcase:
+
+```bash
+DOGFOOD_EXAMPLE_BREAK="applies the bulk discount" node ../../bin/dogfood.mjs run
+```
+
+Observed result: exit 1 and `FAIL`. `AC-bulk-discount` names the testcase that broke. Renaming a test in `checks/suite.mjs` without updating the contract also fails — the selector matches nothing, and a selector matching nothing is never a pass.
+
 ## Exact Playwright evidence
 
 [examples/playwright](https://github.com/proofofwork-agency/dogfood/tree/main/examples/playwright) combines an architecture command with an exact `@dogfood:AC-checkout` browser tag.

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, truncateSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { evaluateAdapter, evaluatePlaywrightJson, evaluatePlaywrightTag, MAX_PLAYWRIGHT_REPORT_BYTES, prepareAdapter } from "../src/adapters.mjs";
+import { evaluateAdapter, evaluatePlaywrightJson, evaluatePlaywrightTag, MAX_EVIDENCE_REPORT_BYTES, prepareAdapter } from "../src/adapters.mjs";
 import { createRedactor } from "../src/redact.mjs";
 import {
   playwrightExecution,
@@ -135,7 +135,7 @@ test("refuses an oversized Playwright report before reading it into memory", () 
   try {
     const reportPath = join(directory, "report.json");
     writeFileSync(reportPath, "");
-    truncateSync(reportPath, MAX_PLAYWRIGHT_REPORT_BYTES + 1);
+    truncateSync(reportPath, MAX_EVIDENCE_REPORT_BYTES + 1);
     const result = evaluatePlaywrightJson(
       { status: "pass", code: 0, timedOut: false, stdout: "" },
       reportPath,

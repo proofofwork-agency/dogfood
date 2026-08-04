@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-/** Every runtime path the published tarball must carry. */
-export const REQUIRED_PREFIXES = ["bin/", "src/", "schemas/", "templates/", "README.md", "LICENSE"];
+/** Every runtime path the published tarball must carry. LICENSE and NOTICE are the licence grant. */
+export const REQUIRED_PREFIXES = ["bin/", "src/", "schemas/", "templates/", "docs/", "README.md", "LICENSE", "NOTICE"];
 
 /** Paths that must never ship: tests, run output, tooling, and live credentials. */
 export const FORBIDDEN_PREFIXES = ["test/", "artifacts/", ".contextrelay/", "node_modules/", "scripts/", ".github/"];

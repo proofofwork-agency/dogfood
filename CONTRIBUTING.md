@@ -9,7 +9,9 @@ npm ci
 npx playwright install --with-deps chromium
 ```
 
-Runtime dependencies are intentionally limited to `ajv`, `ajv-formats`, and `yaml`. Discuss new runtime dependencies before adding them.
+Runtime dependencies are intentionally limited to `ajv`, `ajv-formats`, and `yaml`. Discuss new runtime dependencies before adding them. This is why the Playwright and JUnit report readers are hand-written rather than delegated to a parser library; see `docs/licensing.md` for what ships and under which licence.
+
+Contributions are accepted under the Apache License 2.0. Adding a dependency under a copyleft licence needs explicit sign-off — everything shipped today is MIT, BSD-3-Clause or ISC.
 
 ## Repository layout
 

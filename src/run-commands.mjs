@@ -120,6 +120,7 @@ export async function runNamedCommands(
     artifactDir,
     timeoutMs,
     expectedTagsByCommand = {},
+    expectedCasesByCommand = {},
     authoritative = false,
     allowUntracked = [],
     logs = null,
@@ -168,7 +169,7 @@ export async function runNamedCommands(
       continue;
     }
     const definition = commands[name];
-    const prepared = prepareAdapter(name, definition, artifactDir);
+    const prepared = prepareAdapter(name, definition, artifactDir, { cwd });
     const beforeRepository = await captureRepositoryState(cwd, { authoritative });
     const effectiveTimeoutMs = timeoutMs == null
       ? definition.timeoutMs
@@ -195,6 +196,7 @@ export async function runNamedCommands(
       prepared,
       expectedTagsByCommand[name] || [],
       logs,
+      expectedCasesByCommand[name] || [],
     );
 
     let status = adapter.status;

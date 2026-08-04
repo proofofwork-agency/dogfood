@@ -26,7 +26,7 @@ import {
   summarizeRepository,
 } from "./repository.mjs";
 import { runNamedCommands } from "./run-commands.mjs";
-import { collectCommandsToRun, expectedPlaywrightTags, scoreAcceptanceCriteria } from "./score-ac.mjs";
+import { collectCommandsToRun, expectedJunitCases, expectedPlaywrightTags, scoreAcceptanceCriteria } from "./score-ac.mjs";
 import { validateContract } from "./validate.mjs";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -197,7 +197,11 @@ export async function runDogfood(options = {}) {
     const proofResults = await runNamedCommands(
       collectCommandsToRun(contract),
       contract.commands,
-      { ...runOptions, expectedTagsByCommand: expectedPlaywrightTags(contract) },
+      {
+        ...runOptions,
+        expectedTagsByCommand: expectedPlaywrightTags(contract),
+        expectedCasesByCommand: expectedJunitCases(contract),
+      },
     );
     commandResults.push(...proofResults);
   }
@@ -295,7 +299,7 @@ export async function runDogfood(options = {}) {
 
   // A validate bundle keeps its own pointer so it can never stand in for the proof.
   writeLatestPointer(join(artifactRoot, report.mode === "run" ? "latest.json" : "latest-validate.json"), {
-    version: 3,
+    version: 1,
     runId,
     path: runId,
     summary: `${runId}/summary.md`,

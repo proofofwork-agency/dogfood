@@ -7,6 +7,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import { parse as parseYaml } from "yaml";
 import { isPathInside, normalizeGitPath, tryRealpath } from "./files.mjs";
 import { ContractInputError } from "./load-contract.mjs";
+import { matchesAny } from "./repository.mjs";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const contractSchema = JSON.parse(readFileSync(join(moduleDir, "..", "schemas", "contract.schema.json"), "utf8"));
@@ -38,6 +39,7 @@ export function loadPolicyDocument(cwd, explicitPath) {
 export function validateAuthoritativePolicy(contract, policy) {
   if (!policy) return { ok: true, errors: [], warnings: [] };
   const errors = [];
+  const warnings = [];
   const deterministic = (contract?.acceptanceCriteria || []).filter((item) => item?.class === "deterministic");
   const criteria = contract?.acceptanceCriteria || [];
   if (deterministic.length < policy.criteria.minimumDeterministic) {
@@ -54,7 +56,17 @@ export function validateAuthoritativePolicy(contract, policy) {
   if (policy.build.requireSubject && !contract?.build?.subject) {
     errors.push("authoritative policy requires build.subject");
   }
-  return { ok: errors.length === 0, errors, warnings: [] };
+  // A junit-xml command writes its report into the working tree, which authoritative mode reads as
+  // an untracked mutation unless the path is allowlisted. Warn rather than widen the allowlist from
+  // the contract: what a verification run may write to is the policy's decision, not the contract's.
+  const allowUntracked = policy.mutation?.allowUntracked || [];
+  for (const [name, definition] of Object.entries(contract?.commands || {})) {
+    if (definition?.adapter !== "junit-xml" || typeof definition.reportPath !== "string") continue;
+    if (!matchesAny(definition.reportPath, allowUntracked)) {
+      warnings.push(`commands.${name}.reportPath "${definition.reportPath}" is not covered by mutation.allowUntracked; writing the JUnit report will be reported as a mutation`);
+    }
+  }
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 export function defaultPolicyPath() {

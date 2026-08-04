@@ -152,9 +152,12 @@ npx dogfood verify artifacts/dogfood/<run-id>
 |---|---|---|
 | `kind: command` | `exit-code` | The complete named shell command exited with code 0. |
 | `kind: playwright` | `playwright-json` | Every execution with the exact `@dogfood:<criterion-id>` tag passed on its first attempt. |
+| `kind: junit` | `junit-xml` | The named `<testcase>` exists in the report, has no `<failure>` or `<error>`, and was not skipped. |
 | `kind: advisory` | none | A review receipt was recorded; it never changes the hard verdict. |
 
-Use a Playwright oracle when the claim requires proof that one specific journey existed and ran. A broad browser command exiting 0 cannot prove that a grep or tag matched anything.
+Use a Playwright or JUnit oracle when the claim requires proof that one specific test existed and ran. A broad command exiting 0 cannot prove that a grep or tag matched anything — `pytest -k "no_such_test"` matches nothing and exits 0.
+
+The JUnit adapter reads any runner that emits JUnit XML: pytest, Vitest, Jest, Go via gotestsum, Maven, Gradle, RSpec, PHPUnit. See [docs/junit.md](docs/junit.md).
 
 ## Authoritative policy
 
@@ -192,10 +195,12 @@ Full reference: **https://proofofwork-agency.github.io/dogfood/**
 - [Artifact bundles and verification](docs/artifacts.md)
 - [Signing and provenance](docs/signing.md)
 - [Playwright evidence](docs/playwright.md)
+- [JUnit XML evidence](docs/junit.md)
 - [Advisory receipts](docs/advisory.md)
 - [Continuous integration](docs/ci.md)
 - [Agent operation](docs/agents.md)
 - [Runnable examples](docs/examples.md)
+- [Licensing](docs/licensing.md)
 
 The contract is trusted executable code. Running a contract runs its shell commands without a sandbox. Review contracts and policies before execution.
 

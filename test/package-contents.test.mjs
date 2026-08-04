@@ -4,8 +4,11 @@ import { checkPackFiles, FORBIDDEN_PREFIXES, REQUIRED_PREFIXES } from "../script
 
 const CLEAN_PAYLOAD = [
   "LICENSE",
+  "NOTICE",
   "README.md",
   "bin/dogfood.mjs",
+  "docs/cli.md",
+  "docs/licensing.md",
   "examples/minimal/.dogfood/dogfood.contract.yaml",
   "package.json",
   "schemas/contract.schema.json",

@@ -17,6 +17,20 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
 - **Signing metadata is validated, not just the signature.** `manifest.signing.signatureFile` must
   be exactly `manifest.sig`, and `publicKey` must actually encode an ed25519 key. Verifying a
   signature while trusting the block that describes it left a gap.
+- **A JUnit XML adapter (`adapter: junit-xml`, `oracle kind: junit`).** Binds a criterion to a named
+  `<testcase>` rather than to a suite's exit code, so any runner emitting JUnit XML — pytest,
+  Vitest, Jest, gotestsum, Maven, Gradle, RSpec, PHPUnit — can carry deterministic evidence. A
+  selector matching nothing is a FAIL, never a pass: `pytest -k "no_such_test"` exits 0, and that is
+  the false green this adapter exists to kill. Outcomes are read from `<failure>`/`<error>`/
+  `<skipped>` elements, never from the `<testsuite>` counters, which real emitters get wrong.
+  Commands declare `reportPath` (there is no portable env var to inject, unlike Playwright); the
+  path is cleared before the command runs, must stay inside the workspace, and is republished into
+  the bundle under `evidence/junit-xml/`. The parser is a focused scanner in `src/junit.mjs` with no
+  new dependency; it refuses `<!DOCTYPE>` outright, which structurally removes the billion-laughs
+  entity-expansion vector rather than trying to count expansions.
+- `NOTICE`, `docs/licensing.md`, and a filled-in copyright line in `LICENSE`, which still carried
+  Apache's `[yyyy] [name of copyright owner]` placeholder. All seven shipped packages are MIT,
+  BSD-3-Clause or ISC; no copyleft appears in the distributed tree.
 - **Detached ed25519 manifest signatures.** `dogfood keygen`, `dogfood run --sign <key>`, and
   `dogfood verify <bundle> --key <key>`. The signature lives in `manifest.sig` and covers the exact
   on-disk bytes of `manifest.json`. Implemented with `node:crypto`; no new dependency.
@@ -30,8 +44,10 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
 
 ### Changed
 
-- **Manifest and report go to version 4.** Signing needs a field the closed v3 manifest schema had
-  no room for, and the package was still unpublished, so the format break was free exactly once.
+- **Every format is numbered 1.** Contract, policy, manifest, report and the `latest.json` pointer
+  all start at version 1. Nothing was ever published, so there is no version history to preserve and
+  no reason for the first public release to open at v2/v3/v4. Pre-release bundles do not verify
+  against this build; regenerate them.
 - Default redaction patterns now cover credential-bearing URLs (`DATABASE_URL`, `REDIS_URL`,
   `MONGODB_URI`, `AMQP_URL`, `*_DSN`, `*_CONNECTION_STRING`, `*_URI`), cookies, and auth headers.
   They deliberately do **not** include a blanket `*_URL`: `BASE_URL` and `CI_PROJECT_URL` are
@@ -60,6 +76,10 @@ tamper-evidence it advertised and the merge gate could be satisfied without the 
   every fork PR permanently red.
 - `--baseline-ref` reached `git show` unsanitized, where `--output=` is an arbitrary-file-write
   primitive. Leading dashes are rejected and the resolved OID is passed instead of the user string.
+- **A criterion could report "[fail] — 3 matching execution(s) passed."** When a command failed for
+  reasons unrelated to a given criterion, that criterion's detail was taken from its own selector,
+  which had passed — producing a fail verdict beside a passing message. The detail now explains that
+  the command did not pass, so its report cannot prove the criterion.
 - `init --authoritative` wrote a policy that `run` then ignored; a warning now fires.
 - Ordinary setup failures exit 1 instead of 4.
 - `atomicWriteFile` fsyncs before rename and no longer forces mode 0600.

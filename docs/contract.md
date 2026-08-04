@@ -26,7 +26,8 @@ Each `commands.<name>` object requires:
 |---|---|
 | `run` | Non-empty shell command. |
 | `timeoutMs` | Integer from 1 to 3,600,000. |
-| `adapter` | `exit-code` or `playwright-json`. |
+| `adapter` | `exit-code`, `playwright-json`, or `junit-xml`. |
+| `reportPath` | **Required for `junit-xml`, rejected for every other adapter.** Where the runner writes its JUnit report, relative to the working directory. Absolute paths, drive letters, and `..` segments are refused. |
 
 Each `gates.<name>` value is a non-empty, unique list of command names. A gated command is a hard project-level check even when no criterion maps to it.
 
@@ -36,9 +37,12 @@ Each `gates.<name>` value is a non-empty, unique list of command names. A gated 
 |---|---|---|
 | `command` | `command` | The referenced command must use the `exit-code` adapter. |
 | `playwright` | `command`, `tag` | The command must use `playwright-json`; `tag` must match `^@dogfood:[A-Za-z0-9][A-Za-z0-9._-]*$`. |
+| `junit` | `command`, `testcase` | The command must use `junit-xml`. `testcase` takes a required `name` and an optional `classname`. |
 | `advisory` | none | May be used only by a judgmental criterion. It never changes the hard verdict. |
 
-An exit-code oracle proves only that the complete named command exited 0. Do not use it for a claim that depends on one specific browser journey. A Playwright oracle proves the exact tag exists and that every matching execution passed on its first attempt.
+An exit-code oracle proves only that the complete named command exited 0. Do not use it for a claim that depends on one specific browser journey. A Playwright oracle proves the exact tag exists and that every matching execution passed on its first attempt. A JUnit oracle proves the named testcase exists in the report, has no `<failure>` or `<error>` child, and was not skipped.
+
+Omitting `classname` matches on `name` alone. That is a *stricter* claim, not a weaker one: every matching testcase must pass, so a selector that matches three tests requires all three to be green.
 
 ## Acceptance criteria
 
@@ -132,6 +136,43 @@ acceptanceCriteria:
     oracle: design-review
     severity: minor
 ```
+
+## Complete JUnit example
+
+```yaml
+version: 1
+project: checkout-service
+description: Prove specific tests, not a suite exit code.
+
+commands:
+  suite:
+    run: pytest --junitxml=reports/junit.xml
+    timeoutMs: 600000
+    adapter: junit-xml
+    reportPath: reports/junit.xml
+
+gates:
+  verification: [suite]
+
+oracles:
+  expired-card:
+    kind: junit
+    command: suite
+    testcase:
+      classname: tests.test_checkout
+      name: test_rejects_expired_card
+
+acceptanceCriteria:
+  - id: AC-expired-card
+    text: An expired card is refused at checkout.
+    class: deterministic
+    oracle: expired-card
+    severity: blocker
+```
+
+`classname` and `name` must match what your runner emits. Run the suite once and read the generated
+report to copy the exact strings. See [junit.md](junit.md) for runner flags and the guarantees this
+adapter does and does not give you.
 
 ## Validation warnings
 

@@ -68,14 +68,15 @@ export function validateContract(contract) {
     }
   }
 
+  const ADAPTER_FOR_ORACLE_KIND = { command: "exit-code", playwright: "playwright-json", junit: "junit-xml" };
   for (const [name, oracle] of Object.entries(oracles)) {
     if (!oracle || typeof oracle !== "object") continue;
-    if (oracle.kind === "command" || oracle.kind === "playwright") {
+    const expectedAdapter = ADAPTER_FOR_ORACLE_KIND[oracle.kind];
+    if (expectedAdapter) {
       if (!Object.hasOwn(commands, oracle.command)) {
         errors.push(`oracles.${name} references unknown command "${oracle.command}"`);
         continue;
       }
-      const expectedAdapter = oracle.kind === "command" ? "exit-code" : "playwright-json";
       if (commands[oracle.command]?.adapter !== expectedAdapter) {
         errors.push(
           `oracles.${name} kind=${oracle.kind} requires commands.${oracle.command}.adapter=${expectedAdapter}`,
@@ -86,6 +87,7 @@ export function validateContract(contract) {
 
   const ids = new Set();
   const deterministicPlaywrightCommands = new Set();
+  const deterministicJunitCommands = new Set();
   const deterministicCommands = new Set();
   for (const [index, criterion] of criteria.entries()) {
     if (!criterion || typeof criterion !== "object") continue;
@@ -128,6 +130,15 @@ export function validateContract(contract) {
           );
         }
       }
+      // A JUnit selector names a foreign runner's own testcase, so it cannot be forced to encode
+      // the criterion id the way a Playwright tag can. Renaming the test therefore unbinds the
+      // criterion — which FAILS the run (the selector matches nothing), never silently passes it.
+      if (
+        criterion.class === "deterministic" &&
+        oracles[criterion.oracle]?.kind === "junit"
+      ) {
+        deterministicJunitCommands.add(oracles[criterion.oracle].command);
+      }
     }
 
     if (criterion.class === "excluded" && String(criterion.reason || "").trim() === "") {
@@ -145,6 +156,14 @@ export function validateContract(contract) {
     ) {
       errors.push(
         `commands.${name} uses playwright-json in a gate but has no deterministic Playwright oracle tag`,
+      );
+    }
+    if (
+      commands[name]?.adapter === "junit-xml" &&
+      !deterministicJunitCommands.has(name)
+    ) {
+      errors.push(
+        `commands.${name} uses junit-xml in a gate but has no deterministic JUnit oracle testcase`,
       );
     }
     if (Object.hasOwn(commands, name) && !deterministicCommands.has(name)) {
