@@ -4,8 +4,8 @@
 
 > ## Status: READY FOR HUMAN REVIEW — not released
 >
-> As of `2b380ad`, every blocker below is cleared except two that are deliberate. `npm test` is
-> 129/129, coverage 91.8%, the tool verifies its own signed bundle, and `npm pack` ships a clean
+> As of `9db83d0`, every blocker below is cleared except two that are deliberate. `npm test` is
+> 133/133, coverage 91.8%, the tool verifies its own signed bundle, and `npm pack` ships a clean
 > file list. **Nothing has been published, pushed, or tagged.**
 >
 > Two things are knowingly out of scope for 0.4.0:
@@ -29,6 +29,7 @@
 | Integrity notice said "signing is deferred" | Now describes what the signature does and does not prove |
 | `sha256` ×4, `safeSegment` ×3, `formatAjvError` ×2 | One implementation each (`2b380ad`) |
 | No evaluation with executed evidence | Run; results in the commit history and below |
+| CI paid for a Chromium download per leg, kept artifacts 90 days, skipped node 22 and macOS | Cached, bounded to 30 days, matrix widened (`9db83d0`) |
 
 ## 1. Preflight — all must pass
 

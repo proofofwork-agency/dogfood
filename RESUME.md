@@ -1,6 +1,6 @@
 # Dogfood 0.4.0 — status
 
-**Branch:** `dogfood-0.4.0-remediation` · **`npm test` 129/129** · coverage 91.8% · tree clean apart from untracked `.claude/`
+**Branch:** `dogfood-0.4.0-remediation` · **`npm test` 133/133** · coverage 91.8% · working tree clean
 **Nothing has been published, pushed, or tagged.**
 
 Read **`RELEASE.md`** for the handover checklist. **`.workflows/PLAN.md`** holds the original plan.
@@ -15,6 +15,7 @@ Read **`RELEASE.md`** for the handover checklist. **`.workflows/PLAN.md`** holds
 | P1.5 signing | `1b0659d` | Manifest v4, detached ed25519 signatures, trust model enforced in code |
 | P1.5 publish prep | `aec6b5f` | 0.4.0, `private` removed, `action.yml`, `.npmignore` deleted |
 | P3 dedup | `2b380ad` | `sha256` ×4 → 1, `safeSegment` ×3 → 1, `formatAjvError` ×2 → 1 |
+| P1d CI | `9db83d0` | Playwright browser cache, node 22 + macOS, retention-days, fixture failure artifacts, template de-drift |
 
 ### What P0 actually closed
 
@@ -31,7 +32,7 @@ Read **`RELEASE.md`** for the handover checklist. **`.workflows/PLAN.md`** holds
 1. **JUnit-XML adapter → 0.5.0.** A new feature, not a fix. 0.4.0 is scoped to making the existing claims true; a third adapter would widen the blast radius of exactly the release that shouldn't have one. `.workflows/p15.js` carries the full spec.
 2. **Fork-PR CI validation.** `test/workflow.test.mjs` pins the invariants offline — no duplicate check names, no `checks: write`, no `${{ }}` inside `run:` — but only a real fork PR proves end-to-end behavior. `RELEASE.md` step 7.
 
-Not blocking: `runDogfood` is still one long function (`.workflows/p3.js` has the decomposition), and CI could gain a Playwright browser cache plus a node-22/macOS matrix (`.workflows/p1.js`, P1d).
+Not blocking: `runDogfood` is still one long function (`.workflows/p3.js` has the decomposition plan).
 
 ## Standing constraints
 
@@ -44,7 +45,7 @@ Not blocking: `runDogfood` is still one long function (`.workflows/p3.js` has th
 ## Notes
 
 - **Chromium is installed**, so `npm run test:playwright-fixture` runs locally (3/3 passing).
-- **`.claude/agents/`** — `qa`, `security`, `reviewer`, `documenter`, `evaluator`, `git-ops` were rewritten for this project and are used via `agentType` in the workflow scripts. The rest are still written for an unrelated NestJS/Next.js project and should not be used. `.claude/` is untracked **and not gitignored**, which is a footgun worth settling — dogfood's own `init` creates `.claude/skills/`, so the directory is semantically meaningful here.
+- **`.claude/agents/`** — six agents (`qa`, `security`, `reviewer`, `documenter`, `evaluator`, `git-ops`) were rewritten for this project and are now tracked; they are used via `agentType` in the workflow scripts. `.claude/skills/` is gitignored because eleven of its twelve entries describe an unrelated NestJS stack. Neither ships, via `files[]`.
 - **Don't run probes against the working tree while a workflow holds it.** A transient duplicate-declaration error mid-consolidation briefly looked like a false positive.
 - The **P0 gate agent overruled a verifier with evidence**: it declined to treat `nlink > 1` as non-regular in `verify` after finding all four pre-existing bundles were hardlink-copied, which would have failed every one. It hard-fails in `writeManifest` (production time) and warns in `verify`. Worth preserving if the topic resurfaces.
 - Notifications go to `https://ntfy.sh/pow-done-x`.
