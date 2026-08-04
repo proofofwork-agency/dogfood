@@ -70,11 +70,8 @@ Package 0.4.0 · contract **v2, unchanged** · policy **v1, unchanged** (`logs.c
 - The generic JUnit-XML adapter. It is a new feature, and 0.4.0 is scoped to making the existing
   claims true.
 
-## 0.3.0
+## Before 0.4.0
 
-- Added the explicit authoritative policy profile, baseline regression checks, Git-root mutation rules, log controls, and protected CI templates.
-
-## 0.2.0
-
-- Added the version 2 proof contract, exact command and Playwright adapters, portable artifact bundles, migration, reporting, and offline verification.
-
+Pre-release iteration. Contract, policy, and manifest formats changed several times and were never
+published, so 0.4.0 renumbers all three to version 1 rather than advertising a history no user could
+observe. There is no upgrade path to write, because there is nothing to upgrade from.

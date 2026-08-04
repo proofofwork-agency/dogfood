@@ -19,16 +19,6 @@ const validateContractSchema = ajv.compile(contractSchema);
 const validateReceiptSchema = ajv.compile(receiptSchema);
 
 export function validateContract(contract) {
-  if (contract?.version === 1) {
-    return {
-      ok: false,
-      errors: [
-        "Contract version 1 is not supported by Dogfood v2. Run `dogfood migrate` and review the generated v2 contract.",
-      ],
-      warnings: [],
-    };
-  }
-
   const errors = [];
   const warnings = [];
   if (!validateContractSchema(contract)) {

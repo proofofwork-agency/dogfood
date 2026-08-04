@@ -4,17 +4,16 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ContractInputError, findContractPath } from "../src/load-contract.mjs";
-import { migrateContractFile, MigrationError } from "../src/migrate.mjs";
 import { defaultPolicyPath } from "../src/policy.mjs";
 import { BundleIntegrityError } from "../src/report.mjs";
 import { exitCodeForVerdict, initProject, PACKAGE_ROOT, runDogfood, RunSetupError } from "../src/run.mjs";
 import { SigningError, writeKeyPair } from "../src/sign.mjs";
 import { verifyBundle } from "../src/verify.mjs";
 
-const COMMANDS = new Set(["help", "version", "init", "validate", "run", "verify", "report", "migrate", "keygen"]);
+const COMMANDS = new Set(["help", "version", "init", "validate", "run", "verify", "report", "keygen"]);
 const OPTION_SPECS = {
-  "--cwd": { key: "cwd", value: true, commands: ["init", "validate", "run", "report", "migrate"] },
-  "--contract": { key: "contract", value: true, commands: ["validate", "run", "migrate"] },
+  "--cwd": { key: "cwd", value: true, commands: ["init", "validate", "run", "report"] },
+  "--contract": { key: "contract", value: true, commands: ["validate", "run"] },
   "--policy": { key: "policy", value: true, commands: ["validate", "run"] },
   "--baseline-ref": { key: "baselineRef", value: true, commands: ["validate", "run"] },
   "--subject": { key: "subject", value: true, commands: ["verify"] },
@@ -24,7 +23,6 @@ const OPTION_SPECS = {
   "--json": { key: "json", value: false, commands: ["validate", "run", "verify"] },
   "--force": { key: "force", value: false, commands: ["init", "keygen"] },
   "--authoritative": { key: "authoritative", value: false, commands: ["init"] },
-  "--write": { key: "write", value: false, commands: ["migrate"] },
   "--timeout-ms": { key: "timeoutMs", value: true, commands: ["run"] },
   "--evidence": { key: "evidence", value: true, repeat: true, commands: ["run"] },
 };
@@ -149,17 +147,6 @@ export async function main(argv = process.argv.slice(2)) {
       return 0;
     }
 
-    if (args.command === "migrate") {
-      const contractPath = findContractPath(args.cwd, args.contract);
-      const result = migrateContractFile(contractPath, { write: args.write });
-      if (args.write) {
-        console.log(`Migrated contract in place: ${contractPath}`);
-        console.log(`Backup: ${result.backupPath}`);
-      } else {
-        process.stdout.write(result.yaml);
-      }
-      return 0;
-    }
 
     if (args.command === "report") {
       return printLatestReport(args.cwd);
@@ -211,7 +198,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
     return exitCodeForVerdict(report.verdict);
   } catch (error) {
-    if (error instanceof ContractInputError || error instanceof MigrationError) {
+    if (error instanceof ContractInputError) {
       console.error(error.message);
       return 1;
     }
@@ -357,9 +344,9 @@ Usage:
                    [--baseline-ref git-ref] [--json]
   dogfood run [--cwd dir] [--contract path] [--policy path]
               [--baseline-ref git-ref] [--json] [--timeout-ms n]
-              [--evidence advisory-receipt.json ...]
-  dogfood verify <bundle-dir> [--subject file] [--json]
-  dogfood migrate [--cwd dir] [--contract path] [--write]
+              [--evidence advisory-receipt.json ...] [--sign private-key]
+  dogfood verify <bundle-dir> [--subject file] [--key public-key] [--json]
+  dogfood keygen [--out dir] [--force]
   dogfood report [--cwd dir]
   dogfood version
   dogfood help

@@ -16,7 +16,7 @@ process.once("SIGINT", () => {
 
 export function validContract(overrides = {}) {
   const contract = {
-    version: 2,
+    version: 1,
     project: "test-project",
     build: { requireIdentity: true },
     commands: {

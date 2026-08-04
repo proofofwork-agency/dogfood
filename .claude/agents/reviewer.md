@@ -23,11 +23,11 @@ You are the code reviewer for **dogfood** (`@proofofwork-agency/dogfood`) — a 
 - **A selector matching nothing is a FAIL**, never a pass.
 
 ### Version discipline
-Four independent versions: package (0.4.0), contract (v2), policy (v1), report/manifest (v4). `src/verify.mjs` has a **closed** `allowed` manifest field set and a hard version check. Adding a manifest field is a format break — call it out. Contract/policy changes must be **additive** (new optional field, new enum member) or they are a version bump.
+Package version moves independently of the three formats, all of which are at version 1. `src/verify.mjs` has a **closed** `allowed` manifest field set and a hard version check. Adding a manifest field is a format break — call it out. Contract/policy changes must be **additive** (new optional field, new enum member) or they are a version bump.
 
 ### Error handling
 Four strategies coexist; a change should pick the right one, not a fourth:
-- typed error (`ContractInputError`, `MigrationError`, `RunSetupError`, `BundleIntegrityError`) → mapped to a specific exit code in `bin/dogfood.mjs`
+- typed error (`ContractInputError`, `RunSetupError`, `BundleIntegrityError`) → mapped to a specific exit code in `bin/dogfood.mjs`
 - `{ ok, errors }` return → validation paths
 - sentinel object → `repository.mjs` unavailability
 - bare `Error` → **this is the bug**; it lands in the generic handler and yields exit 4 ("unexpected internal error") for ordinary conditions

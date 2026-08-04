@@ -50,7 +50,7 @@ The package is scoped and was historically `private: true`. Preparing a release 
 1. `package.json` version bumped, `private` removed, `publishConfig.access: "public"` set
 2. `files[]` verified by `node scripts/check-package-contents.mjs` — this is the real check; `npm pack --dry-run` alone only proves npm exited 0
 3. `prepublishOnly` wired so a bad file set cannot ship by accident
-4. `CHANGELOG.md` has an entry for the version, listing every behavior change — this project carries **four independent version numbers** (package, contract v2, policy v1, report/manifest v4), so the changelog must say which moved
+4. `CHANGELOG.md` has an entry for the version, listing every behavior change — the package version moves independently of the contract, policy, and manifest formats, which are all at version 1
 5. `RELEASE.md` contains the exact commands the human will run, and states plainly at the top that nothing in it has been executed
 6. `npm test`, `npm run test:self`, and `npm run test:playwright-fixture` are green
 7. The tool verifies its own freshly produced authoritative bundle

@@ -19,9 +19,9 @@ So: **never write a claim you have not verified against the source.** Read `bin/
 
 - `README.md` (~150 lines) — what it is, one diagram, what a PASS means, quickstart, CLI table, links out. Nothing else.
 - `docs/cli.md` — every command and every flag, exit codes, env vars (`DOGFOOD=1` injected into commands, `DOGFOOD_DEBUG`), contract auto-discovery order, output truncation limits
-- `docs/contract.md` — contract v2 field by field, with **complete, valid** examples
+- `docs/contract.md` — contract fields one by one, with **complete, valid** examples
 - `docs/policy.md` — policy v1 field by field
-- `docs/artifacts.md` — bundle layout, manifest v4, `verify` semantics, `latest.json` vs `latest-validate.json`
+- `docs/artifacts.md` — bundle layout, manifest version 1, `verify` semantics, `latest.json` vs `latest-validate.json`
 - `docs/signing.md` — the trust model (see below)
 - `docs/playwright.md`, `docs/junit.md` — adapter contracts
 - `docs/advisory.md` — receipts and `--evidence`

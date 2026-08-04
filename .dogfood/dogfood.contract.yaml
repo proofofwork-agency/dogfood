@@ -1,4 +1,4 @@
-version: 2
+version: 1
 project: dogfood
 description: Dogfood v0.3 proves its own runner, browser adapter, nested self-run, and package contents.
 

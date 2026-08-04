@@ -6,7 +6,7 @@ Contracts contain shell commands and run without a sandbox. Review a contract be
 
 Mutation detection covers Git-visible state within its configured boundary. Authoritative mode expands that boundary to the Git root and non-ignored untracked files, but Git-ignored files remain invisible.
 
-`dogfood verify` proves internal consistency of a manifest v3 bundle. It does not prove provenance: an actor able to rewrite the bundle can regenerate its unsigned manifest. Preserve evidence in an independently trusted store when origin matters.
+`dogfood verify` proves a bundle is internally consistent. On its own it does not prove provenance: an actor able to rewrite the bundle can regenerate an unsigned manifest, and a public key recorded inside a manifest is not a trust anchor because the same actor can replace it. Sign runs with `dogfood run --sign`, and establish origin with `dogfood verify --key <public key obtained out of band>`. Bare `verify` on a signed bundle reports the signature as present but unverified and never claims provenance.
 
 Standard and authoritative runs redact matching environment values and declared literals by default. Redaction cannot protect secrets that were not selected, and `logs.capture: full` disables it. Avoid secrets in command lines and limit access to uploaded bundles.
 

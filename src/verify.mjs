@@ -24,9 +24,6 @@ export function verifyBundle(bundleDir, { subject = null, key = null, cwd = proc
   } catch (error) {
     return result(directory, null, [`manifest.json is invalid JSON: ${error.message}`], warnings);
   }
-  if (manifest?.version === 2 || manifest?.version === 3) {
-    return result(directory, manifest, [`report/manifest v${manifest.version} predates the signed manifest format; rerun with Dogfood v0.4 or newer to produce a verifiable bundle`], warnings);
-  }
   validateManifest(manifest, errors);
   if (errors.length > 0) return result(directory, manifest, errors, warnings);
   const recorded = new Set(Object.keys(manifest.checksums));
@@ -179,7 +176,7 @@ function validateManifest(manifest, errors) {
     errors.push("manifest root must be an object");
     return;
   }
-  if (manifest.version !== 4) errors.push(`unsupported manifest version: ${JSON.stringify(manifest.version)}`);
+  if (manifest.version !== 1) errors.push(`unsupported manifest version: ${JSON.stringify(manifest.version)}`);
   const allowed = new Set([
     "version", "checksumAlgorithm", "runId", "mode", "profile", "verdict", "validationVerdict",
     "proofVerdict", "contract", "policy", "repository", "runtime", "package", "build", "commands",

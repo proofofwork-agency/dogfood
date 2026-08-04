@@ -107,7 +107,7 @@ npx dogfood init
 The starter contract intentionally cannot pass until you replace its placeholder. A minimal complete contract looks like this:
 
 ```yaml
-version: 2
+version: 1
 project: my-service
 
 build:
@@ -178,7 +178,6 @@ The authoritative profile can require a criteria floor and named gates, block co
 | `dogfood run` | Execute a fresh proof and write an evidence bundle. |
 | `dogfood verify` | Check a bundle's manifest, checksums, snapshots, and declared subject. |
 | `dogfood report` | Print the latest executed-run summary. |
-| `dogfood migrate` | Convert a version 1 contract to version 2. |
 | `dogfood version` | Print the package version. |
 | `dogfood help` | Print usage and exit codes. |
 

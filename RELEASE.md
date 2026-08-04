@@ -21,7 +21,7 @@
 
 | Was blocking | Now |
 |---|---|
-| No signing; manifest v3 | Manifest v4 with detached ed25519 signatures (`1b0659d`) |
+| No signing | Detached ed25519 signatures (`1b0659d`) |
 | `private: true`, version `0.3.0` | `0.4.0`, `publishConfig.access: public`, `prepublishOnly` (`aec6b5f`) |
 | README ~564 lines, stale CI description | 147 lines, reference material in `docs/` |
 | `AGENTS.md` listed 3 of 8 commands | Full command list, exit codes, and the signing caveat |
@@ -95,7 +95,7 @@ node -p "const p=require('./package.json'); [p.version, p.private, p.publishConf
 
 `@proofofwork-agency/dogfood` is scoped, and scoped packages default to **restricted** — without `publishConfig.access` the publish will either fail or silently go private.
 
-Confirm `CHANGELOG.md` has a 0.4.0 entry naming which of the **four independent version numbers** moved: package (0.4.0), contract (v2, unchanged), policy (v1, unchanged), report/manifest (3 → 4). Verify every behavior change listed against `git log a7dfb9d..HEAD`.
+Confirm `CHANGELOG.md` has a 0.4.0 entry. Contract, policy, and manifest are all **version 1** — nothing was ever released, so 0.4.0 renumbers them rather than advertising a history no user could observe. Verify every behavior change listed against `git log a7dfb9d..HEAD`.
 
 ## 4. Commit and tag
 

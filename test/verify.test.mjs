@@ -126,16 +126,16 @@ test("detects source, normalized snapshot, policy, and report cross-check tamper
   assert.equal(verifyBundle(policyRun.artifactDir).ok, false);
 });
 
-test("rejects pre-v4 bundles with rerun guidance", () => {
+test("rejects a manifest whose version this build does not produce", () => {
   const cwd = createProject();
-  // v3 predates detached signing, so it is rejected exactly like v2 rather than silently accepted.
-  for (const version of [2, 3]) {
+  // Nothing before v1 was ever released, so there is no legacy format to accept — only this one.
+  for (const version of [0, 2, 99]) {
     const bundle = join(cwd, `v${version}-bundle`);
     mkdirSync(bundle);
     writeFileSync(join(bundle, "manifest.json"), JSON.stringify({ version }));
     const result = verifyBundle(bundle);
     assert.equal(result.ok, false, `v${version} must not verify`);
-    assert.match(result.errors[0], /rerun with Dogfood v0\.4 or newer/);
+    assert.match(result.errors[0], /unsupported manifest version/);
   }
 });
 

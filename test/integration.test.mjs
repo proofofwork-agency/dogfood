@@ -5,7 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 import { stringify as stringifyYaml } from "yaml";
 import { initProject, PACKAGE_ROOT, runDogfood } from "../src/run.mjs";
-import { migrateContractFile } from "../src/migrate.mjs";
 import { validateContract } from "../src/validate.mjs";
 import { createProject, validContract } from "./helpers.mjs";
 
@@ -24,7 +23,7 @@ test("validate checks mappings without pretending execution", async () => {
 
 test("standard mode preserves excluded-only runs and never auto-loads a policy", async () => {
   const contract = {
-    version: 2,
+    version: 1,
     project: "excluded-only",
     commands: {},
     gates: {},
@@ -73,7 +72,7 @@ test("a passing run emits the complete portable artifact bundle", async () => {
     manifest.checksums["summary.json"],
     createHash("sha256").update(readFileSync(join(artifactDir, "summary.json"))).digest("hex"),
   );
-  assert.equal(manifest.version, 4);
+  assert.equal(manifest.version, 1);
   assert.equal(manifest.package.version, packageVersion);
   const latest = JSON.parse(readFileSync(join(cwd, "artifacts", "dogfood", "latest.json")));
   assert.equal(latest.path, report.runId);
@@ -258,32 +257,6 @@ test("advisory concern receipts are copied but do not change PASS", async () => 
   assert.ok(existsSync(join(artifactDir, "evidence", "advisory", "artifacts", "1", "1-screenshot.txt")));
 });
 
-test("v1 runs fail with migration guidance and --write migration creates a backup", async () => {
-  const v1 = {
-    version: 1,
-    project: "old",
-    commands: { proof: "node check.mjs" },
-    gates: { verification: ["proof"] },
-    acceptanceCriteria: [
-      {
-        id: "AC-proof",
-        class: "deterministic",
-        severity: "major",
-        oracle: { kind: "command", ref: "proof" },
-      },
-    ],
-  };
-  const cwd = createProject(v1);
-  const before = await runDogfood({ cwd, validateOnly: true });
-  assert.equal(before.report.verdict, "INVALID");
-  assert.match(before.report.validation.errors[0], /dogfood migrate/);
-
-  const contractPath = join(cwd, ".dogfood", "dogfood.contract.yaml");
-  const migrated = migrateContractFile(contractPath, { write: true });
-  assert.ok(existsSync(migrated.backupPath));
-  const parsed = (await import("yaml")).parse(readFileSync(contractPath, "utf8"));
-  assert.equal(validateContract(parsed).ok, true);
-});
 
 test("init installs equivalent skills without overwriting existing agent files", async () => {
   const cwd = createProject();

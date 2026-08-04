@@ -102,7 +102,7 @@ export async function runDogfood(options = {}) {
   if (options.baselineRef) {
     if (!authoritative || !policyDocument.validation.ok) {
       validation.errors.push("--baseline-ref requires a valid authoritative --policy");
-    } else if (contract && typeof contract === "object" && contract.version === 2) {
+    } else if (contract && typeof contract === "object" && contract.version === 1) {
       baseline = compareBaseline({
         cwd,
         contractPath,

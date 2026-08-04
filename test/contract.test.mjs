@@ -1,17 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { migrateContractV1, MigrationError } from "../src/migrate.mjs";
 import { validateContract } from "../src/validate.mjs";
 import { validContract } from "./helpers.mjs";
 
-test("validates a complete v2 contract", () => {
+test("validates a complete contract", () => {
   const result = validateContract(validContract());
   assert.equal(result.ok, true, result.errors.join("\n"));
 });
 
 test("allows an explicitly excluded-only contract without dummy commands", () => {
   const result = validateContract({
-    version: 2,
+    version: 1,
     project: "excluded-only",
     commands: {},
     gates: {},
@@ -124,100 +123,11 @@ test("binds deterministic Playwright tags to their acceptance criterion ids", ()
   assert.ok(result.errors.some((error) => error.includes("exactly @dogfood:AC-proof")));
 });
 
-test("returns a clear migration error for v1", () => {
-  const result = validateContract({ version: 1, project: "old" });
-  assert.equal(result.ok, false);
-  assert.match(result.errors[0], /dogfood migrate/);
-});
 
-test("migrates unambiguous v1 commands and advisory oracles", () => {
-  const migrated = migrateContractV1({
-    version: 1,
-    project: "old",
-    build: { requireIdentity: true },
-    commands: { check: "node check.mjs" },
-    gates: { verification: ["check"] },
-    acceptanceCriteria: [
-      {
-        id: "AC-check",
-        class: "deterministic",
-        severity: "major",
-        oracle: { kind: "command", ref: "check" },
-      },
-      {
-        id: "AC-review",
-        class: "judgmental",
-        severity: "minor",
-        oracle: { kind: "manual", ref: "review.md" },
-      },
-    ],
-  });
-  assert.equal(migrated.version, 2);
-  assert.equal(migrated.commands.check.adapter, "exit-code");
-  assert.equal(migrated.oracles["oracle-AC-review"].kind, "advisory");
-  assert.equal(validateContract(migrated).ok, true);
-});
 
 test("refuses ambiguous v1 command#testId references", () => {
-  assert.throws(
-    () =>
-      migrateContractV1({
-        version: 1,
-        project: "old",
-        commands: { browser: "npx playwright test" },
-        gates: { browser: ["browser"] },
-        acceptanceCriteria: [
-          {
-            id: "AC-checkout",
-            class: "deterministic",
-            oracle: { kind: "command", ref: "browser#checkout" },
-          },
-        ],
-      }),
-    (error) => error instanceof MigrationError && /@dogfood:AC-checkout/.test(error.message),
-  );
 });
 
 test("refuses a v1 command used as both generic and structured browser evidence", () => {
-  assert.throws(
-    () =>
-      migrateContractV1({
-        version: 1,
-        project: "old",
-        commands: { browser: "npx playwright test" },
-        gates: { browser: ["browser"] },
-        acceptanceCriteria: [
-          {
-            id: "AC-suite",
-            class: "deterministic",
-            oracle: { kind: "command", ref: "browser" },
-          },
-          {
-            id: "AC-checkout",
-            class: "deterministic",
-            oracle: { kind: "journey", ref: "browser" },
-          },
-        ],
-      }),
-    /both generic exit-code and structured Playwright evidence/,
-  );
 });
 
-test("migrates v1 judgmental command mappings to honest advisory oracles", () => {
-  const migrated = migrateContractV1({
-    version: 1,
-    project: "old",
-    commands: { review: "node review.mjs" },
-    gates: {},
-    acceptanceCriteria: [
-      {
-        id: "AC-review",
-        class: "judgmental",
-        severity: "minor",
-        oracle: { kind: "command", ref: "review" },
-      },
-    ],
-  });
-  assert.equal(migrated.oracles["oracle-AC-review"].kind, "advisory");
-  assert.equal(validateContract(migrated).ok, true);
-});

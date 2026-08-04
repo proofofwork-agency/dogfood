@@ -93,7 +93,7 @@ export function buildReport({
   const proofVerdict = validateOnly || !validation.ok ? "NOT_RUN" : classifyVerdict(uniqueHardFails);
   const verdict = validateOnly ? validationVerdict : validation.ok ? proofVerdict : "FAIL";
   return {
-    version: 4,
+    version: 1,
     runId,
     mode: validateOnly ? "validate" : "run",
     profile: authoritative ? "authoritative" : "standard",
@@ -144,7 +144,7 @@ export function writeReport(artifactDir, report) {
   atomicWriteJson(join(artifactDir, "summary.json"), report);
   atomicWriteFile(join(artifactDir, "summary.md"), toMarkdown(report), "utf8");
   atomicWriteJson(join(artifactDir, "matrix.json"), {
-    version: 4,
+    version: 1,
     project: report.project,
     runId: report.runId,
     verdict: report.verdict,
@@ -173,7 +173,7 @@ export function writeManifest(artifactDir, details) {
     checksums[entry.name] = sha256(readFileSync(entry.path));
   }
   const manifest = {
-    version: 4,
+    version: 1,
     checksumAlgorithm: "sha256",
     runId: details.runId,
     mode: details.mode,

@@ -4,7 +4,7 @@ Dogfood is a portable evidence gate. The normative operating instructions are in
 
 ## Commands
 
-`dogfood help` · `dogfood version` · `dogfood init` · `dogfood validate` · `dogfood run` · `dogfood verify` · `dogfood report` · `dogfood migrate` · `dogfood keygen`
+`dogfood help` · `dogfood version` · `dogfood init` · `dogfood validate` · `dogfood run` · `dogfood verify` · `dogfood report` · `dogfood keygen`
 
 When `.dogfood/dogfood.policy.yaml` exists, pass it explicitly with `--policy`; policies are not auto-discovered. `artifacts/dogfood/latest.json` selects the latest executed proof, while `latest-validate.json` selects validation-only output.
 

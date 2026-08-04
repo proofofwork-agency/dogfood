@@ -1,4 +1,4 @@
-# Contract version 2
+# Contract version 1
 
 A Dogfood contract is trusted executable configuration. The `commands.*.run` values execute through the host shell with no sandbox. Review the file before running it.
 
@@ -61,7 +61,7 @@ For a deterministic Playwright criterion, the oracle tag must be exactly `@dogfo
 ## Complete Playwright example
 
 ```yaml
-version: 2
+version: 1
 project: checkout-ui
 description: Prove that a customer can finish checkout.
 
@@ -99,7 +99,7 @@ The Playwright configuration must write its JSON report to the file path in `PLA
 ## Complete architecture example
 
 ```yaml
-version: 2
+version: 1
 project: service-boundaries
 
 commands:
